@@ -5,6 +5,8 @@
 
 #include <cstddef>
 #include <string>
+#include <memory>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -44,12 +46,22 @@ enum class SketchConstraintKind {
     Distance,
     Length,
     Radius,
+    Diameter,
+    DistanceX,
+    DistanceY,
+};
+
+enum class SketchElement { Geometry, LineStart, LineEnd, CircleCenter, Origin };
+
+struct SketchReference final {
+    std::optional<DocumentId> entity;
+    SketchElement element{SketchElement::Origin};
 };
 
 struct SketchConstraint final {
     DocumentId id;
     SketchConstraintKind kind{SketchConstraintKind::Coincident};
-    std::vector<DocumentId> entities;
+    std::vector<SketchReference> targets;
     double value{};
 };
 
@@ -61,8 +73,10 @@ struct SketchProblem final {
 
 struct SketchSolveReport final {
     SketchSolveState state{SketchSolveState::Failed};
-    std::size_t remaining_degrees_of_freedom{};
+    int remaining_degrees_of_freedom{-1};
     std::vector<std::string> diagnostics;
+    std::vector<DocumentId> conflicting_constraints;
+    std::vector<DocumentId> redundant_constraints;
 };
 
 // Solver-specific entities and handles remain adapter details. The document
@@ -72,5 +86,7 @@ public:
     virtual ~SketchConstraintAdapter() = default;
     [[nodiscard]] virtual SketchSolveReport solve(SketchProblem& problem) = 0;
 };
+
+[[nodiscard]] std::unique_ptr<SketchConstraintAdapter> make_planegcs_adapter(double tolerance_mm = 0.001);
 
 } // namespace blendercad

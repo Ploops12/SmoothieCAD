@@ -37,12 +37,11 @@ STEP operations use fresh sessions and explicit writer units instead of changing
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target package_addon -j2
-ctest --test-dir build --output-on-failure
-ALSOFT_DRIVERS=null blender --background --factory-startup --python-exit-code 1 --python tests/native_geometry.py -- --module-dir build/addon/blendercad
-ALSOFT_DRIVERS=null blender --background --factory-startup --python-exit-code 1 --python tests/blender_foundation.py -- --addon-zip build/dist/blendercad-0.1.0.zip
+cmake --build build --target check -j2
+# Focused geometry rerun after building:
+ctest --test-dir build -R native_geometry --output-on-failure
 ```
 
-Host CTest requires NumPy in the configured Python; the target Blender includes it. `ALSOFT_DRIVERS=null` avoids an audio-shutdown stall observed in the sandbox, unrelated to the CAD checks.
+The `check` target builds the addon package and runs CTest. Native checks use the target Blender and its bundled NumPy. CTest sets `ALSOFT_DRIVERS=null` to avoid an audio-shutdown stall observed in the sandbox, unrelated to the CAD checks.
 
 The checks cover analytical volumes at 0.01–1000 mm scales, rotated/translated planes, mesh orientation and topology mappings, curved tessellation refinement, subtraction, STEP round trips, configured tolerance rejection, handle isolation/lifetimes, document snapshot round trips and malformed UUID rejection. The packaged-addon Blender check covers native import, registration, scene save/reopen, registration cycling, and protection against overwriting existing/future-schema documents. These checks do not establish interactive selection, undo synchronization, constrained sketching, feature history or bracket acceptance.

@@ -15,6 +15,7 @@
 #endif
 
 namespace py = pybind11;
+void bind_sketch(py::module_& module);
 
 template <typename T>
 py::array_t<T> bulk_array(const std::vector<T>& values) {
@@ -155,4 +156,5 @@ PYBIND11_MODULE(_native, module) {
         .def("release", &blendercad::GeometryAdapter::release);
     module.def("new_geometry_adapter", &blendercad::make_occt_geometry_adapter,
                py::arg("geometric_budget_mm") = 0.001);
+    bind_sketch(module);
 }

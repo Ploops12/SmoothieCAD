@@ -1,0 +1,19 @@
+# Embedded PlaneGCS
+
+The solver source is the FreeCAD `src/Mod/Sketcher/App/planegcs/` subtree at commit [`5a6be36bc32900ea0d041b92792b0ae07ea31400`](https://github.com/FreeCAD/FreeCAD/tree/5a6be36bc32900ea0d041b92792b0ae07ea31400/src/Mod/Sketcher/App/planegcs). The eleven source/header files and LGPL license are vendored under `third_party/planegcs/upstream/`; no FreeCAD application is invoked or linked. `manifest.json` records the source identity and individual SHA256 values.
+
+`cmake/PlaneGCS.cmake` builds a private position-independent static target. The compatibility headers replace only FreeCAD's console, diagnostic timing, build-configuration, export-macro and Boost forwarding-header surfaces. `upstream/src/Mod/Sketcher/SketcherGlobal.h` is a locally supplied export shim, not an upstream source file. Solver algorithms are not locally patched. Eigen and Boost are demonstrated header dependencies of this upstream code; they are acquired by `cmake/Dependencies.cmake`, with no separate provisioning script.
+
+The pinned snapshot predates [upstream pointer-ordering concern #33399](https://github.com/FreeCAD/FreeCAD/issues/33399). The adapter allocates unknown parameters contiguously and tests repeated solves, but that is not a claim of general solver determinism or an upstream fix. Broader determinism and numerical stress cases remain part of sketch acceptance.
+
+Build-time source acquisition, compilation and cleanup belong to CMake. Nothing in the installed addon downloads solver code, installs packages or compiles libraries at runtime. The current addon ZIP is still a development artifact: runtime-library relocation/bundling and complete dependency redistribution artifacts remain incomplete.
+
+## Adapter boundary
+
+`SketchProblem` contains local 2D line/circle coordinates, an arbitrary 3D orthonormal plane, and persistent entity/constraint UUIDs. Targets identify a whole line/circle, a line start/end, a circle center, or the fixed sketch origin. Solver pointers and integer diagnostic tags are adapter-owned. Signed X/Y dimensions mean second target minus first target; all dimensional values are millimetres. Distance is Euclidean; length, radius and diameter are positive. Horizontal/vertical refer to local sketch axes, not world axes.
+
+The native adapter implements coincidence, horizontal/vertical, parallel/perpendicular, point distance, signed X/Y distance, line length and circle radius/diameter. It reports degrees of freedom and underconstrained, fully constrained, redundant, conflicting or failed states, and maps conflicting/redundant tags back to stable constraint UUIDs. Malformed definitions raise value errors; a conflicting or unsuccessful solve preserves input geometry. A successful candidate is checked for finite, nondegenerate geometry and constraint residuals before publication. Dimensional validation uses the configured tolerance (default 0.001 mm); parallel/perpendicular validation uses a normalized sine/cosine residual of at most 1e-8.
+
+PlaneGCS can report `Converged` before reduced/redundant parameters are applied. The adapter validates every final constraint independently; neither that status nor `Success` alone authorizes geometry publication. Input numbers, references and dimensions are checked before invoking the solver.
+
+`cmake --build build --target check` includes the focused sketch cases in Blender: a fully constrained rectangle, repeated solves, unconstrained/underconstrained geometry, circle dimensions, point distances, parallel/perpendicular lines, redundant/conflicting diagnostics, invalid definitions and infeasible nonlinear failure preservation. This does not yet establish persistent sketch storage, dragging/previews, expression-driven dimensions or Blender sketch tools; those remain implementation work.

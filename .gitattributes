@@ -1,0 +1,4 @@
+# Keep the bytes recorded in the vendored source manifest on every platform.
+third_party/planegcs/upstream/** -text
+# The upstream license is CRLF; preserve it without flagging CR as whitespace.
+third_party/planegcs/upstream/LICENSE whitespace=cr-at-eol
