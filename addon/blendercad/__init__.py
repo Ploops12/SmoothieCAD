@@ -35,7 +35,8 @@ def _classes():
 
         @classmethod
         def poll(cls, context):
-            return _native is not None and context.scene is not None
+            return (_native is not None and context.scene is not None
+                    and not context.scene.blendercad_document_snapshot)
 
         def execute(self, context):
             document = _native.Document()

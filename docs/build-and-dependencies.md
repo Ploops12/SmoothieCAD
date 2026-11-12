@@ -25,7 +25,7 @@ To point CMake at non-standard installations, set the normal CMake package searc
 | PlaneGCS | Planar sketch solver | Not integrated yet; adapter and pinned source revision belong to the sketch-constraint milestone |
 | OndselSolver | Assembly solver | Not integrated yet; adapter and pinned source revision belong to the assembly milestone |
 
-The OCCT adapter currently owns in-memory `TopoDS_Shape` values behind adapter-local opaque handles and supports box construction, validity checks, volume queries, and release. The addon snapshot does not contain evaluated shapes. Runtime library bundling, license notices for redistributed binary dependencies, and relocation/rpath policy remain packaging work before distribution. No runtime downloads or user-side dependency builds are part of the intended addon install flow.
+The OCCT adapter owns in-memory `TopoDS_Shape` values behind adapter-local opaque handles and supports box construction, arbitrary-plane polygon/circle extrusion, subtraction, validity/volume/tolerance queries, bulk tessellation, STEP exchange, and release. The addon snapshot does not contain evaluated shapes. Runtime library bundling, license notices for redistributed binary dependencies, and relocation/rpath policy remain packaging work before distribution. The current ZIP therefore still requires this build machine's OCCT runtime. No runtime downloads or user-side dependency builds are part of the intended final addon install flow.
 
 ## Layer ownership
 

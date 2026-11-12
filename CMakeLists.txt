@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 project(BlenderCAD VERSION 0.1.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
+include(CTest)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,7 +40,8 @@ target_include_directories(blendercad_geometry_occt
 target_compile_features(blendercad_geometry_occt PUBLIC cxx_std_20)
 target_link_libraries(blendercad_geometry_occt
     PUBLIC BlenderCAD::Core
-    PRIVATE TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKTopAlgo TKPrim
+    PRIVATE TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlgo TKPrim
+            TKBO TKBool TKMesh TKDESTEP TKXSBase
 )
 
 if(BLENDERCAD_BUILD_PYTHON)
@@ -54,6 +56,12 @@ if(BLENDERCAD_BUILD_PYTHON)
     set_target_properties(_native PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/addon/blendercad"
     )
+    if(BUILD_TESTING)
+        add_test(NAME native_geometry
+            COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/native_geometry.py"
+                --module-dir "$<TARGET_FILE_DIR:_native>"
+        )
+    endif()
 
     add_custom_target(package_addon
         COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/package_addon.py"

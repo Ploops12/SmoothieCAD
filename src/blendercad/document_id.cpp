@@ -39,8 +39,9 @@ DocumentId DocumentId::parse(std::string_view text) {
     Bytes bytes{};
     std::size_t byte_index = 0;
     int high_nibble = -1;
-    for (const char character : text) {
-        if (character == '-') continue;
+    for (std::size_t index = 0; index < text.size(); ++index) {
+        if (index == 8 || index == 13 || index == 18 || index == 23) continue;
+        const char character = text[index];
         const int value = hex_value(character);
         if (value < 0) throw std::invalid_argument("document identity contains non-hexadecimal data");
         if (high_nibble < 0) {

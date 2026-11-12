@@ -2,6 +2,9 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
+
+#include "blendercad/geometry_types.hpp"
 
 namespace blendercad {
 
@@ -17,12 +20,22 @@ class GeometryAdapter {
 public:
     virtual ~GeometryAdapter() = default;
     [[nodiscard]] virtual ShapeHandle make_box(double x_mm, double y_mm, double z_mm) = 0;
+    [[nodiscard]] virtual ShapeHandle extrude_polygon(const std::vector<Point2>& points,
+                                                     const SketchPlane& plane, double depth_mm) = 0;
+    [[nodiscard]] virtual ShapeHandle extrude_circle(Point2 center, double radius_mm,
+                                                    const SketchPlane& plane, double depth_mm) = 0;
+    [[nodiscard]] virtual ShapeHandle subtract(ShapeHandle body, ShapeHandle tool) = 0;
+    [[nodiscard]] virtual DisplayMesh tessellate(ShapeHandle shape, double linear_deflection_mm,
+                                               double angular_deflection_rad) const = 0;
+    virtual void write_step(ShapeHandle shape, const std::string& path) const = 0;
+    [[nodiscard]] virtual ShapeHandle read_step(const std::string& path) = 0;
     [[nodiscard]] virtual double volume_mm3(ShapeHandle shape) const = 0;
     [[nodiscard]] virtual bool is_valid(ShapeHandle shape) const = 0;
+    [[nodiscard]] virtual double max_tolerance_mm(ShapeHandle shape) const = 0;
     virtual void release(ShapeHandle shape) = 0;
 };
 
-[[nodiscard]] std::unique_ptr<GeometryAdapter> make_occt_geometry_adapter();
+[[nodiscard]] std::unique_ptr<GeometryAdapter> make_occt_geometry_adapter(double geometric_budget_mm = 0.001);
 [[nodiscard]] const char* occt_version() noexcept;
 
 } // namespace blendercad

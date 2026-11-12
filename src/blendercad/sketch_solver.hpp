@@ -1,6 +1,7 @@
 #pragma once
 
 #include "blendercad/document_id.hpp"
+#include "blendercad/geometry_types.hpp"
 
 #include <cstddef>
 #include <string>
@@ -17,11 +18,6 @@ enum class SketchSolveState {
     Failed,
 };
 
-struct Point2 final {
-    double x{};
-    double y{};
-};
-
 struct Line2 final {
     Point2 start;
     Point2 end;
@@ -30,18 +26,6 @@ struct Line2 final {
 struct Circle2 final {
     Point2 center;
     double radius{};
-};
-
-struct Vector3 final {
-    double x{};
-    double y{};
-    double z{};
-};
-
-struct SketchPlane final {
-    Vector3 origin;
-    Vector3 x_axis{1.0, 0.0, 0.0};
-    Vector3 y_axis{0.0, 1.0, 0.0};
 };
 
 using SketchGeometry = std::variant<Line2, Circle2>;
