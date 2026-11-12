@@ -10,6 +10,13 @@ cmake --build build --target package_addon -j2
 cmake --build build --target check -j2
 ```
 
+On Linux with the optional host tool `xvfb-run` installed, CMake additionally
+provides `cmake --build build --target check_solid_ui`. This isolates a Blender
+window, configuration and generated files under the build tree and checks
+actual event-queue routing/undo. It is separate from the headless `check` target;
+see [Solid integration](solid-integration.md) for coverage and limits. Normal
+`clean` also removes its logs and temporary files.
+
 The first configure acquires pinned build dependencies. Subsequent builds reuse the build-local cache. Matching installed OCCT 7.9.3 and pybind11 3.1.0 packages are preferred by default; if absent, CMake fetches and builds their pinned source revisions. `-DBLENDERCAD_USE_SYSTEM_DEPENDENCIES=OFF` forces those source paths. The solver's Eigen/Boost header dependencies are always acquired at the recorded versions, and PlaneGCS itself is vendored at a fixed upstream revision. `cmake/Dependencies.cmake` is the dependency lock/build entry point. It verifies archive hashes or pinned Git object identities; `cmake/PlaneGCS.cmake` checks the vendored source hashes.
 
 No dependency acquisition or compilation runs inside the addon. The package is written to `build/dist/blendercad-0.1.0.zip`. Its binary currently targets this Linux CPython 3.14 ABI. Runtime library bundling/relocation and complete redistribution artifacts remain unfinished, so this ZIP is still a development artifact requiring the build machine's OCCT runtime. Do not treat a successful build as installed-package acceptance on a different machine.
@@ -49,6 +56,6 @@ The Linux dependency-lifecycle verification exercised matching installed package
 
 ## Layer ownership
 
-The C++ document core owns stable identities, revisions, tolerance, named unit-tagged values and persistent sketch/feature definitions. The Python binding translates versioned mappings; the addon serializes these definitions into a hidden Blender scene property. Unsupported future snapshots are rejected and preserved. The addon currently exposes only document creation and basic state, not modelling tools or history UI. See [document snapshots](document-snapshots.md) for schema and mutation contracts.
+The C++ document core owns stable identities, revisions, tolerance, named unit-tagged values and persistent sketch/feature definitions. The Python binding translates versioned mappings; the addon serializes these definitions into a hidden Blender scene property. Unsupported future snapshots are rejected and preserved. The addon exposes initial numeric rectangle/depth commands and managed Solid presentation, not the complete modelling/history UI. See [document snapshots](document-snapshots.md) for schema and mutation contracts and [Solid integration](solid-integration.md) for publication, commands and undo.
 
-The OCCT adapter owns transient evaluated shapes and exposes controlled queries, never kernel pointers. A separate feature evaluator owns cached results, source-snapshot/current-result guards and explicitly stale last-valid displays. Display arrays carry evaluated-local topology indices; persistent topology references and Blender presentation publishing remain to be implemented. The sketch adapter owns PlaneGCS objects and maps diagnostic tags to persistent constraint identities. Solver pointers and caches are not document data. Blender objects and presentation remain a separate integration milestone.
+The OCCT adapter owns transient evaluated shapes and exposes controlled queries, never kernel pointers. A separate feature evaluator owns cached results, source-snapshot/current-result guards and explicitly stale last-valid displays. Display arrays carry evaluated-local topology indices; persistent topology references remain to be implemented. The sketch adapter owns PlaneGCS objects and maps diagnostic tags to persistent constraint identities. Solver pointers and caches are not document data. The addon presentation adapter publishes managed Blender meshes and reconstructs disposable caches after load/undo. Its Cycles CPU rendering and capability checks run through the CMake check pipeline.

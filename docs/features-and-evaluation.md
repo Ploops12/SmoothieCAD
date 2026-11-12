@@ -38,6 +38,14 @@ If a new failed feature has no own last-valid shape, the body may display its pr
 
 Calls are synchronous and contain no Blender API access. Concurrent document mutation/evaluator calls and asynchronous scene publication are not implemented. A future worker/presentation layer must keep immutable source snapshots and apply only still-current results on Blender's main thread.
 
+`FeatureEvaluator.fork()` copies document/report/cache state for speculative
+evaluation while retaining shared ownership of immutable cached shapes and
+their original geometry-adapter namespaces. Successful or failed evaluation
+on the branch does not replace the source evaluator's results. Either branch
+can outlive the other. This supports transactional presentation preparation;
+it is not a concurrent/thread-safe evaluator API. Generation counters are
+branch-local, not globally unique pick identities.
+
 ## Persistence and verification
 
 Snapshot schema 3 adds `features` and `rollback_before`. Feature records encode `id`, `name`, `version`, `type`, `body`, `sketch`, `input` (null for a base extrusion), `depth` and `suppressed`. Depth encodes exactly one of `{"value_mm": number}` or `{"parameter": name}`. Schema 1/2 load in memory with an empty feature history and no rollback; original scene payloads remain unchanged until an explicit save of edited definitions. Unsupported feature versions/types fail closed.
@@ -46,4 +54,4 @@ Snapshot schema 3 adds `features` and `rollback_before`. Feature records encode 
 
 ## Remaining integration
 
-Solid hosts, managed Blender meshes, picking/highlighting, material mapping, command previews/cancellation, undo/redo synchronization and UI history/editing remain to be implemented. CAD face/edge provenance and persistent reference repair are not yet produced by this evaluator; display indices must not be saved in downstream feature definitions. Constant-radius fillets, expression-driven dimensions, multiple profile regions and broader operations remain separate feature work. No bracket slice or final installed-package acceptance is claimed here.
+Initial Solid hosts, managed Blender meshes, evaluated-local picking, whole-body materials, numeric commands and undo/redo reconstruction are implemented in the [presentation adapter](solid-integration.md). Command previews/cancellation, highlighting and complete UI history/sketch editing remain incomplete. CAD face/edge provenance and persistent reference repair are not yet produced by this evaluator; display indices must not be saved in downstream feature definitions. Constant-radius fillets, expression-driven dimensions, multiple profile regions and broader operations remain separate feature work. No bracket slice or final installed-package acceptance is claimed here.

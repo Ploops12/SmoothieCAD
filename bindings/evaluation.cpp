@@ -36,6 +36,8 @@ void bind_evaluation(py::module_& module) {
         .def_readonly("reused_count", &EvaluationReport::reused_count);
     py::class_<FeatureEvaluator>(module, "FeatureEvaluator")
         .def(py::init<>())
+        .def("fork", &FeatureEvaluator::fork,
+             "Create an isolated evaluator state sharing immutable cached geometry ownership.")
         .def("evaluate", &FeatureEvaluator::evaluate)
         .def("matches_document", &FeatureEvaluator::matches_document)
         .def("volume_mm3", [](const FeatureEvaluator& evaluator, const Document& document, const std::string& body) {

@@ -2,6 +2,7 @@
 
 import argparse
 import copy
+import gc
 import json
 import math
 from pathlib import Path
@@ -325,6 +326,57 @@ class FeatureChecks(unittest.TestCase):
         self.assertFalse(display["current"])
         self.assertEqual(display["feature_id"], failed)
         self.assertEqual(display["geometry_feature_id"], base)
+
+    def test_fork_recomputes_divergent_document_without_mutating_source_cache(self):
+        document, _, _, _, body = part()
+        source = n.FeatureEvaluator()
+        source.evaluate(document)
+        source_volume = source.volume_mm3(document, body)
+        source_display = source.tessellate(document, body)
+
+        fork = source.fork()
+        candidate = n.Document.from_snapshot(document.to_snapshot())
+        candidate.set_parameter_value("thickness", 6)
+        report = fork.evaluate(candidate)
+        self.assertEqual(report.computed_count, 2)
+        self.assertTrue(fork.matches_document(candidate))
+        self.assertAlmostEqual(fork.volume_mm3(candidate, body), 6 * (600 - math.pi * 9), places=8)
+
+        self.assertTrue(source.matches_document(document))
+        self.assertFalse(source.matches_document(candidate))
+        self.assertAlmostEqual(source.volume_mm3(document, body), source_volume, places=10)
+        unchanged = source.tessellate(document, body)
+        self.assertEqual(unchanged["geometry_generation"], source_display["geometry_generation"])
+        np.testing.assert_array_equal(unchanged["positions"], source_display["positions"])
+        np.testing.assert_array_equal(unchanged["triangle_faces"], source_display["triangle_faces"])
+
+    def test_fork_failure_retains_last_valid_shape_and_outlives_source(self):
+        document, _, base, _, body = part()
+        source = n.FeatureEvaluator()
+        source.evaluate(document)
+        original_volume = source.volume_mm3(document, body)
+        original_display = source.tessellate(document, body)
+
+        fork = source.fork()
+        broken = n.Document.from_snapshot(document.to_snapshot())
+        broken.set_feature_depth(base, 0)
+        report = fork.evaluate(broken)
+        self.assertEqual([item.state for item in report.features], [S.FAILED, S.BLOCKED])
+        self.assertTrue(report.features[0].has_last_valid)
+        stale = fork.tessellate(broken, body)
+        self.assertFalse(stale["current"])
+        self.assertEqual(stale["geometry_generation"], original_display["geometry_generation"])
+        np.testing.assert_array_equal(stale["positions"], original_display["positions"])
+
+        # The branch owns its copied cache state; shared OwnedShape instances keep
+        # their kernel adapter and handle alive after the source evaluator dies.
+        self.assertAlmostEqual(source.volume_mm3(document, body), original_volume, places=10)
+        del source
+        gc.collect()
+        self.assertTrue(fork.matches_document(broken))
+        surviving = fork.tessellate(broken, body)
+        self.assertFalse(surviving["current"])
+        np.testing.assert_array_equal(surviving["positions"], original_display["positions"])
 
 
 if __name__ == "__main__":

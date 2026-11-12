@@ -1,17 +1,17 @@
 # BlenderCAD
 
-BlenderCAD is an ordinary Blender addon with a separate C++ computational core. The current implementation establishes the build/package path, a versioned design document, and a minimal OCCT geometry service. It does not yet provide interactive CAD modelling tools.
+BlenderCAD is an ordinary Blender addon with a separate C++ computational core. The current implementation provides a versioned design document, OCCT/PlaneGCS services and initial numeric modelling commands with managed Solid display. The complete interactive sketch-to-bracket workflow remains under development.
 
 ## Current implementation
 
 - `src/blendercad/`: persistent document/parameter definitions and geometry/solver interfaces.
 - `bindings/`: pybind11 extension exposing document and geometry APIs.
-- `addon/blendercad/`: Blender addon entry point, status panel, and scene-embedded document snapshot.
+- `addon/blendercad/`: Blender integration, document commands, managed Solid display and scene-embedded snapshots.
 - `tools/`: addon packaging utility.
-- `tests/`: focused geometry, sketch-solving, Blender persistence, and CMake cleanup checks.
+- `tests/`: geometry, sketch-solving, Solid/persistence, event-routing and CMake cleanup checks.
 - `docs/`: architecture and build/dependency notes.
 
-The native core provides stable IDs, versioned snapshots, atomic revisions, unit-tagged parameters, persistent sketches and extrusion/subtractive feature definitions. PlaneGCS solves sketch constraints; a revision-aware evaluator drives OCCT, caches unchanged results and retains explicitly stale displays on failure while blocking stale measurements/exports. Features support named length inputs, suppression, dependency-checked reorder/deletion and rollback. The addon preserves these definitions in Blender scene properties. These are foundation APIs: Solid presentation, topology provenance and interactive modelling commands are not implemented yet.
+The native core provides stable IDs, versioned snapshots, atomic revisions, unit-tagged parameters, persistent sketches and extrusion/subtractive feature definitions. PlaneGCS solves sketch constraints; a revision-aware evaluator drives OCCT, caches unchanged results and retains explicitly stale displays on failure while blocking stale measurements/exports. Features support named length inputs, suppression, dependency-checked reorder/deletion and rollback. The addon preserves these definitions in Blender scene properties and presents bodies through non-mesh hosts with managed meshes. Numeric rectangle/depth/parameter commands, definition duplication, conversion, deletion and load/undo reconstruction work inside Blender. Persistent topology references and the complete interactive modelling workflow remain incomplete.
 
 ## Build and package
 
@@ -32,3 +32,5 @@ See [Geometry service and verification](docs/geometry-service.md) for native API
 See [Document snapshots](docs/document-snapshots.md) for schema versions, sketch ownership, edit semantics and load failure behavior.
 
 See [Features and evaluation](docs/features-and-evaluation.md) for body ownership, dependency history, caching, failures and query/export guards.
+
+See [Managed Solid presentation](docs/solid-integration.md) for the Blender workflow, picking/materials, commands, undo and documented integration gaps.

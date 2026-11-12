@@ -58,6 +58,10 @@ public:
     ~FeatureEvaluator();
     FeatureEvaluator(const FeatureEvaluator&) = delete;
     FeatureEvaluator& operator=(const FeatureEvaluator&) = delete;
+    // Copy the complete cache state for isolated speculative evaluation. Cached
+    // immutable shapes retain shared ownership and stay in their original
+    // geometry adapter handle namespace.
+    [[nodiscard]] std::unique_ptr<FeatureEvaluator> fork() const;
     [[nodiscard]] EvaluationReport evaluate(const Document& document);
     [[nodiscard]] bool matches_document(const Document& document) const;
     [[nodiscard]] double volume_mm3(const Document& document, const DocumentId& body) const;

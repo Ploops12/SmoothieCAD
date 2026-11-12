@@ -117,6 +117,12 @@ struct FeatureEvaluator::Impl final {
 FeatureEvaluator::FeatureEvaluator() : impl_(std::make_unique<Impl>()) {}
 FeatureEvaluator::~FeatureEvaluator() = default;
 
+std::unique_ptr<FeatureEvaluator> FeatureEvaluator::fork() const {
+    auto result = std::make_unique<FeatureEvaluator>();
+    result->impl_ = std::make_unique<Impl>(*impl_);
+    return result;
+}
+
 bool FeatureEvaluator::matches_document(const Document& document) const {
     return impl_->document && *impl_->document == document;
 }
