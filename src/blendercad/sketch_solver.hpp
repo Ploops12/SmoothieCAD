@@ -1,7 +1,6 @@
 #pragma once
 
-#include "blendercad/document_id.hpp"
-#include "blendercad/geometry_types.hpp"
+#include "blendercad/sketch.hpp"
 
 #include <cstddef>
 #include <string>
@@ -18,57 +17,6 @@ enum class SketchSolveState {
     Redundant,
     Conflicting,
     Failed,
-};
-
-struct Line2 final {
-    Point2 start;
-    Point2 end;
-};
-
-struct Circle2 final {
-    Point2 center;
-    double radius{};
-};
-
-using SketchGeometry = std::variant<Line2, Circle2>;
-
-struct SketchEntity final {
-    DocumentId id;
-    SketchGeometry geometry;
-};
-
-enum class SketchConstraintKind {
-    Coincident,
-    Horizontal,
-    Vertical,
-    Parallel,
-    Perpendicular,
-    Distance,
-    Length,
-    Radius,
-    Diameter,
-    DistanceX,
-    DistanceY,
-};
-
-enum class SketchElement { Geometry, LineStart, LineEnd, CircleCenter, Origin };
-
-struct SketchReference final {
-    std::optional<DocumentId> entity;
-    SketchElement element{SketchElement::Origin};
-};
-
-struct SketchConstraint final {
-    DocumentId id;
-    SketchConstraintKind kind{SketchConstraintKind::Coincident};
-    std::vector<SketchReference> targets;
-    double value{};
-};
-
-struct SketchProblem final {
-    SketchPlane plane;
-    std::vector<SketchEntity> entities;
-    std::vector<SketchConstraint> constraints;
 };
 
 struct SketchSolveReport final {

@@ -24,7 +24,7 @@ public:
     }
 
     SketchSolveReport solve(SketchProblem& problem) override {
-        validate_plane(problem.plane);
+        validate_sketch(problem);
         if (problem.constraints.size() >= static_cast<std::size_t>(std::numeric_limits<int>::max())) {
             throw std::invalid_argument("too many sketch constraints");
         }
@@ -240,13 +240,6 @@ public:
     }
 
 private:
-    static void validate_plane(const SketchPlane& plane) {
-        for (const auto v : {plane.origin, plane.x_axis, plane.y_axis}) { finite(v.x); finite(v.y); finite(v.z); }
-        const auto x = plane.x_axis, y = plane.y_axis;
-        if (std::abs(x.x*x.x + x.y*x.y + x.z*x.z - 1) > 1e-10 ||
-            std::abs(y.x*y.x + y.y*y.y + y.z*y.z - 1) > 1e-10 ||
-            std::abs(x.x*y.x + x.y*y.y + x.z*y.z) > 1e-10) throw std::invalid_argument("sketch plane axes must be orthonormal");
-    }
     const double tolerance_;
 };
 

@@ -32,7 +32,8 @@ void bind_sketch(py::module_& module) {
             return SketchEntity{identity(id), std::move(geometry)};
         }), py::arg("geometry"), py::arg("id") = "")
         .def_property_readonly("id", [](const SketchEntity& entity) { return entity.id.to_string(); })
-        .def_readwrite("geometry", &SketchEntity::geometry);
+        .def_property("geometry", [](const SketchEntity& entity) { return entity.geometry; },
+            [](SketchEntity& entity, SketchGeometry geometry) { entity.geometry = std::move(geometry); });
 
     py::enum_<SketchElement>(module, "SketchElement")
         .value("GEOMETRY", SketchElement::Geometry)
@@ -67,13 +68,22 @@ void bind_sketch(py::module_& module) {
         }), py::arg("kind"), py::arg("targets"), py::arg("value") = 0, py::arg("id") = "")
         .def_property_readonly("id", [](const SketchConstraint& constraint) { return constraint.id.to_string(); })
         .def_readwrite("kind", &SketchConstraint::kind)
-        .def_readwrite("targets", &SketchConstraint::targets)
+        .def_property("targets", [](const SketchConstraint& constraint) { return constraint.targets; },
+            [](SketchConstraint& constraint, std::vector<SketchReference> targets) {
+                constraint.targets = std::move(targets);
+            })
         .def_readwrite("value", &SketchConstraint::value);
     py::class_<SketchProblem>(module, "SketchProblem")
         .def(py::init<>())
         .def_readwrite("plane", &SketchProblem::plane)
-        .def_readwrite("entities", &SketchProblem::entities)
-        .def_readwrite("constraints", &SketchProblem::constraints);
+        .def_property("entities", [](const SketchProblem& problem) { return problem.entities; },
+            [](SketchProblem& problem, std::vector<SketchEntity> entities) {
+                problem.entities = std::move(entities);
+            })
+        .def_property("constraints", [](const SketchProblem& problem) { return problem.constraints; },
+            [](SketchProblem& problem, std::vector<SketchConstraint> constraints) {
+                problem.constraints = std::move(constraints);
+            });
     py::enum_<SketchSolveState>(module, "SketchSolveState")
         .value("UNDERCONSTRAINED", SketchSolveState::Underconstrained)
         .value("FULLY_CONSTRAINED", SketchSolveState::FullyConstrained)

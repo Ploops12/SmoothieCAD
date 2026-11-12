@@ -1,5 +1,4 @@
 #include "blendercad/document_id.hpp"
-#include "blendercad/document.hpp"
 #include "blendercad/geometry.hpp"
 
 #include <pybind11/pybind11.h>
@@ -16,6 +15,7 @@
 
 namespace py = pybind11;
 void bind_sketch(py::module_& module);
+void bind_document(py::module_& module);
 
 template <typename T>
 py::array_t<T> bulk_array(const std::vector<T>& values) {
@@ -46,69 +46,6 @@ PYBIND11_MODULE(_native, module) {
             PyErr_SetString(PyExc_RuntimeError, failure.GetMessageString());
         }
     });
-
-    py::enum_<blendercad::ParameterUnit>(module, "ParameterUnit")
-        .value("MILLIMETRE", blendercad::ParameterUnit::Millimetre)
-        .value("DEGREE", blendercad::ParameterUnit::Degree)
-        .value("UNITLESS", blendercad::ParameterUnit::Unitless);
-
-    py::class_<blendercad::Parameter>(module, "Parameter")
-        .def_readonly("name", &blendercad::Parameter::name)
-        .def_readonly("value", &blendercad::Parameter::value)
-        .def_property_readonly("unit", [](const blendercad::Parameter& parameter) {
-            return std::string(blendercad::unit_name(parameter.unit));
-        });
-
-    py::class_<blendercad::Document>(module, "Document")
-        .def(py::init<>())
-        .def_property_readonly("id", [](const blendercad::Document& document) {
-            return document.id().to_string();
-        })
-        .def_property_readonly("schema_version", &blendercad::Document::schema_version)
-        .def_property_readonly("revision", &blendercad::Document::revision)
-        .def_property_readonly("geometric_tolerance_mm", &blendercad::Document::geometric_tolerance_mm)
-        .def_property_readonly("parameters", &blendercad::Document::parameters)
-        .def("set_geometric_tolerance_mm", &blendercad::Document::set_geometric_tolerance_mm)
-        .def("add_parameter", [](blendercad::Document& document, std::string name,
-                                  double value, const std::string& unit) {
-            document.add_parameter(std::move(name), value, blendercad::parse_unit(unit));
-        }, py::arg("name"), py::arg("value"), py::arg("unit") = "unitless")
-        .def("set_parameter_value", &blendercad::Document::set_parameter_value)
-        .def("to_snapshot", [](const blendercad::Document& document) {
-            py::dict snapshot;
-            snapshot["schema_version"] = document.schema_version();
-            snapshot["document_id"] = document.id().to_string();
-            snapshot["revision"] = document.revision();
-            snapshot["geometric_tolerance_mm"] = document.geometric_tolerance_mm();
-            py::list parameters;
-            for (const auto& parameter : document.parameters()) {
-                py::dict item;
-                item["name"] = parameter.name;
-                item["value"] = parameter.value;
-                item["unit"] = blendercad::unit_name(parameter.unit);
-                parameters.append(std::move(item));
-            }
-            snapshot["parameters"] = std::move(parameters);
-            return snapshot;
-        })
-        .def_static("from_snapshot", [](const py::dict& snapshot) {
-            const auto schema = py::cast<std::uint32_t>(snapshot["schema_version"]);
-            if (schema != blendercad::Document::current_schema_version) {
-                throw std::invalid_argument("unsupported BlenderCAD document schema version");
-            }
-            std::vector<blendercad::Parameter> parameters;
-            for (const auto item_object : py::cast<py::list>(snapshot["parameters"])) {
-                const auto item = py::cast<py::dict>(item_object);
-                parameters.push_back({
-                    py::cast<std::string>(item["name"]),
-                    py::cast<double>(item["value"]),
-                    blendercad::parse_unit(py::cast<std::string>(item["unit"]))});
-            }
-            return blendercad::Document::restore(
-                blendercad::DocumentId::parse(py::cast<std::string>(snapshot["document_id"])),
-                py::cast<std::uint64_t>(snapshot["revision"]),
-                py::cast<double>(snapshot["geometric_tolerance_mm"]), std::move(parameters));
-        });
 
     py::class_<blendercad::Point2>(module, "Point2")
         .def(py::init<double, double>())
@@ -157,4 +94,5 @@ PYBIND11_MODULE(_native, module) {
     module.def("new_geometry_adapter", &blendercad::make_occt_geometry_adapter,
                py::arg("geometric_budget_mm") = 0.001);
     bind_sketch(module);
+    bind_document(module);
 }

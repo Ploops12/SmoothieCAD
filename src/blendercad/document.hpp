@@ -1,6 +1,7 @@
 #pragma once
 
 #include "blendercad/document_id.hpp"
+#include "blendercad/sketch.hpp"
 
 #include <cstdint>
 #include <string>
@@ -28,29 +29,38 @@ struct Parameter final {
 // held by GeometryAdapter and are not part of this snapshot.
 class Document final {
 public:
-    static constexpr std::uint32_t current_schema_version = 1;
+    static constexpr std::uint32_t current_schema_version = 2;
     static constexpr double default_geometric_tolerance_mm = 0.001;
 
     Document();
     explicit Document(DocumentId id);
     static Document restore(DocumentId id, std::uint64_t revision,
-                            double tolerance_mm, std::vector<Parameter> parameters);
+                            double tolerance_mm, std::vector<Parameter> parameters,
+                            std::vector<SketchDefinition> sketches = {});
 
     [[nodiscard]] const DocumentId& id() const noexcept { return id_; }
     [[nodiscard]] std::uint32_t schema_version() const noexcept { return current_schema_version; }
     [[nodiscard]] std::uint64_t revision() const noexcept { return revision_; }
     [[nodiscard]] double geometric_tolerance_mm() const noexcept { return geometric_tolerance_mm_; }
     [[nodiscard]] const std::vector<Parameter>& parameters() const noexcept { return parameters_; }
+    [[nodiscard]] const std::vector<SketchDefinition>& sketches() const noexcept { return sketches_; }
+    [[nodiscard]] const SketchDefinition& sketch(const DocumentId& id) const;
 
     void set_geometric_tolerance_mm(double tolerance);
     void add_parameter(std::string name, double value, ParameterUnit unit);
     void set_parameter_value(std::string_view name, double value);
+    DocumentId add_sketch(std::string name, SketchProblem problem);
+    void replace_sketch(const DocumentId& id, SketchProblem problem);
+    void rename_sketch(const DocumentId& id, std::string name);
 
 private:
     DocumentId id_;
     std::uint64_t revision_{0};
     double geometric_tolerance_mm_{default_geometric_tolerance_mm};
     std::vector<Parameter> parameters_;
+    std::vector<SketchDefinition> sketches_;
+    void ensure_revision_available() const;
+    void publish_sketches(std::vector<SketchDefinition> sketches);
 };
 
 } // namespace blendercad

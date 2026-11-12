@@ -11,7 +11,7 @@ BlenderCAD is an ordinary Blender addon with a separate C++ computational core. 
 - `tests/`: focused geometry, sketch-solving, Blender persistence, and CMake cleanup checks.
 - `docs/`: architecture and build/dependency notes.
 
-The native core provides stable document IDs, schema-versioned snapshots, content revisions, named parameters with basic unit tags, and an OCCT adapter for primitives, arbitrary-plane extrusion, subtraction, validity/volume queries, bulk tessellation and STEP exchange. An embedded PlaneGCS adapter solves line/circle sketch constraints with typed targets and diagnostic identities. The addon can create and persist an empty document snapshot in Blender scene properties. These are foundation APIs, not a user-facing feature history. Persistent sketches, feature evaluation, topology provenance, and modelling commands are not implemented yet.
+The native core provides stable document IDs, schema-versioned snapshots, content revisions, named parameters with basic unit tags, and an OCCT adapter for primitives, arbitrary-plane extrusion, subtraction, validity/volume queries, bulk tessellation and STEP exchange. An embedded PlaneGCS adapter solves line/circle sketch constraints with typed targets and diagnostic identities. Documents own persistent sketch definitions with atomic edit/revision checks and schema migration. The addon can create a document and preserve its parameter/sketch snapshot in Blender scene properties. These are foundation APIs, not a user-facing feature history. Feature evaluation, topology provenance, and interactive modelling commands are not implemented yet.
 
 ## Build and package
 
@@ -28,3 +28,5 @@ Install `build/dist/blendercad-0.1.0.zip` through Blender Preferences → Get Ex
 See [Build and dependencies](docs/build-and-dependencies.md) for dependency discovery, platform constraints, and the current integration boundary.
 
 See [Geometry service and verification](docs/geometry-service.md) for native APIs and focused checks, and [Working-slice acceptance](docs/roadmap.md) for remaining milestone requirements.
+
+See [Document snapshots](docs/document-snapshots.md) for schema versions, sketch ownership, edit semantics and load failure behavior.

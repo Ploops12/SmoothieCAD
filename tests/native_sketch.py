@@ -58,6 +58,23 @@ class SketchChecks(unittest.TestCase):
     def setUp(self):
         self.solver = n.new_sketch_solver()
 
+    def test_returned_values_survive_container_and_variant_replacement(self):
+        problem = rectangle()
+        entity = problem.entities[0]
+        constraint = problem.constraints[0]
+        target = constraint.targets[0]
+        geometry = entity.geometry
+        entity_id, constraint_id, target_id = entity.id, constraint.id, target.entity
+        problem.entities = []
+        problem.constraints = []
+        constraint.targets = []
+        entity.geometry = n.Circle2(n.Point2(1, 2), 3)
+        self.assertEqual(entity.id, entity_id)
+        self.assertEqual(constraint.id, constraint_id)
+        self.assertEqual(target.entity, target_id)
+        self.assertAlmostEqual(geometry.start.x, 0.1)
+        self.assertEqual(problem.entities, [])
+
     def test_rectangle_and_repeated_solve(self):
         for iteration in range(20):
             problem = rectangle()

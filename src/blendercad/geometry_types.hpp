@@ -5,8 +5,14 @@
 
 namespace blendercad {
 
-struct Point2 final { double x{}; double y{}; };
-struct Vector3 final { double x{}; double y{}; double z{}; };
+struct Point2 final {
+    double x{}; double y{};
+    friend bool operator==(const Point2&, const Point2&) = default;
+};
+struct Vector3 final {
+    double x{}; double y{}; double z{};
+    friend bool operator==(const Vector3&, const Vector3&) = default;
+};
 
 // Right-handed local sketch coordinates in millimetres. Axes must be unit
 // length and orthogonal; geometry adapters reject malformed frames.
@@ -14,6 +20,7 @@ struct SketchPlane final {
     Vector3 origin;
     Vector3 x_axis{1.0, 0.0, 0.0};
     Vector3 y_axis{0.0, 1.0, 0.0};
+    friend bool operator==(const SketchPlane&, const SketchPlane&) = default;
 };
 
 // Disposable display arrays. Topology indices are local to this evaluated
