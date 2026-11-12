@@ -72,6 +72,7 @@ def _classes():
             self.layout.label(text=f"Document {document.id[:8]} · revision {document.revision}")
             self.layout.label(text=f"Parameters: {len(document.parameters)}")
             self.layout.label(text=f"Sketches: {len(document.sketches)}")
+            self.layout.label(text=f"Features: {len(document.features)}")
             self.layout.label(text=f"Model tolerance: {document.geometric_tolerance_mm:g} mm")
 
     return (BLENDERCAD_OT_new_document, BLENDERCAD_PT_status)

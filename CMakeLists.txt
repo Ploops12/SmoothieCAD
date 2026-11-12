@@ -33,6 +33,7 @@ add_library(blendercad_core STATIC
     src/blendercad/document_id.cpp
     src/blendercad/document.cpp
     src/blendercad/sketch.cpp
+    src/blendercad/feature.cpp
 )
 add_library(BlenderCAD::Core ALIAS blendercad_core)
 set_target_properties(blendercad_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -65,16 +66,21 @@ target_link_libraries(blendercad_geometry_occt
             TKBO TKBool TKMesh TKDESTEP TKXSBase
 )
 
+add_library(blendercad_evaluation STATIC src/blendercad/evaluation.cpp)
+set_target_properties(blendercad_evaluation PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(blendercad_evaluation PUBLIC BlenderCAD::Core BlenderCAD::GeometryOCCT blendercad_sketch)
+
 if(BLENDERCAD_BUILD_PYTHON)
     find_package(Python 3.14 EXACT COMPONENTS Interpreter Development.Module REQUIRED)
     blendercad_resolve_pybind11()
 
-    pybind11_add_module(_native MODULE bindings/module.cpp bindings/sketch.cpp bindings/document.cpp)
+    pybind11_add_module(_native MODULE bindings/module.cpp bindings/sketch.cpp bindings/document.cpp bindings/evaluation.cpp)
     target_link_libraries(_native PRIVATE BlenderCAD::Core)
     target_include_directories(_native PRIVATE ${OpenCASCADE_INCLUDE_DIR})
     target_compile_definitions(_native PRIVATE BLENDERCAD_VERSION="${PROJECT_VERSION}")
     target_link_libraries(_native PRIVATE BlenderCAD::GeometryOCCT)
     target_link_libraries(_native PRIVATE blendercad_sketch)
+    target_link_libraries(_native PRIVATE blendercad_evaluation)
     set_target_properties(_native PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/addon/blendercad"
     )
@@ -99,6 +105,11 @@ if(BLENDERCAD_BUILD_PYTHON)
                 --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/document_snapshot.py"
                 -- --module-dir "$<TARGET_FILE_DIR:_native>"
         )
+        add_test(NAME native_features
+            COMMAND "${BLENDERCAD_BLENDER_EXECUTABLE}" --background --factory-startup
+                --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/native_features.py"
+                -- --module-dir "$<TARGET_FILE_DIR:_native>"
+        )
         add_test(NAME cmake_cleanup
             COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake_cleanup.py"
                 --cmake "${CMAKE_COMMAND}" --script "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Clean.cmake"
@@ -108,7 +119,7 @@ if(BLENDERCAD_BUILD_PYTHON)
                 --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/blender_foundation.py"
                 -- --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
         )
-        set_tests_properties(native_geometry native_sketch document_snapshot blender_foundation PROPERTIES
+        set_tests_properties(native_geometry native_sketch document_snapshot native_features blender_foundation PROPERTIES
             ENVIRONMENT "ALSOFT_DRIVERS=null"
         )
         add_custom_target(check

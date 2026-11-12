@@ -19,24 +19,24 @@ def identity(number):
     return f"00000000-0000-4000-8000-{number:012x}"
 
 
-def populated_problem():
+def populated_problem(offset=0):
     problem = n.SketchProblem()
     problem.plane.origin = n.Vector3(12.5, -7.0, 3.25)
     problem.plane.x_axis = n.Vector3(0.0, 1.0, 0.0)
     problem.plane.y_axis = n.Vector3(0.0, 0.0, 1.0)
-    line = n.SketchEntity(n.Line2(n.Point2(-2.0, 0.5), n.Point2(8.0, 0.5)), identity(3))
-    circle = n.SketchEntity(n.Circle2(n.Point2(2.0, 4.0), 1.75), identity(4))
+    line = n.SketchEntity(n.Line2(n.Point2(-2.0, 0.5), n.Point2(8.0, 0.5)), identity(3 + offset))
+    circle = n.SketchEntity(n.Circle2(n.Point2(2.0, 4.0), 1.75), identity(4 + offset))
     problem.entities = [line, circle]
     problem.constraints = [
         n.SketchConstraint(n.SketchConstraintKind.HORIZONTAL,
-                           [n.SketchReference(line.id, n.SketchElement.GEOMETRY)], id=identity(5)),
+                           [n.SketchReference(line.id, n.SketchElement.GEOMETRY)], id=identity(5 + offset)),
         n.SketchConstraint(n.SketchConstraintKind.RADIUS,
                            [n.SketchReference(circle.id, n.SketchElement.GEOMETRY)],
-                           value=1.75, id=identity(6)),
+                           value=1.75, id=identity(6 + offset)),
         n.SketchConstraint(n.SketchConstraintKind.DISTANCE_X,
                            [n.SketchReference(),
                             n.SketchReference(circle.id, n.SketchElement.CIRCLE_CENTER)],
-                           value=2.0, id=identity(7)),
+                           value=2.0, id=identity(7 + offset)),
     ]
     return problem
 
@@ -50,6 +50,19 @@ def complete_document():
     sketch_id = document.add_sketch("Profile", populated_problem())
     document.rename_sketch(sketch_id, "Profile sketch")
     return document
+
+
+def feature_document():
+    document = complete_document()
+    profile_id = document.sketches[0].id
+    pocket_sketch_id = document.add_sketch("Pocket profile", populated_problem(200))
+    extrusion_id = document.add_extrusion("Base extrusion", profile_id, "plate_width")
+    pocket_id = document.add_subtractive_extrusion(
+        "Pocket", extrusion_id, pocket_sketch_id, 4.25
+    )
+    document.set_feature_suppressed(pocket_id, True)
+    document.set_rollback_before(pocket_id)
+    return document, profile_id, pocket_sketch_id, extrusion_id, pocket_id
 
 
 class DocumentSnapshotChecks(unittest.TestCase):
@@ -94,28 +107,157 @@ class DocumentSnapshotChecks(unittest.TestCase):
         self.assertEqual(restored.id, document.id)
         self.assertEqual([item.id for item in restored.sketches], [item["id"] for item in original["sketches"]])
 
-    def test_schema_one_migrates_in_memory_and_emits_schema_two(self):
+    def test_schema_one_migrates_in_memory_and_emits_schema_three(self):
         document = n.Document()
         document.add_parameter("height", 4.0, "mm")
         old_snapshot = document.to_snapshot()
         old_snapshot["schema_version"] = 1
         del old_snapshot["sketches"]
+        del old_snapshot["features"]
+        del old_snapshot["rollback_before"]
         restored = n.Document.from_snapshot(old_snapshot)
-        self.assertEqual(restored.schema_version, 2)
-        self.assertEqual(restored.to_snapshot()["schema_version"], 2)
+        self.assertEqual(restored.schema_version, 3)
+        self.assertEqual(restored.to_snapshot()["schema_version"], 3)
         self.assertEqual(restored.sketches, [])
         self.assertEqual(restored.revision, old_snapshot["revision"])
+
+    def test_schema_two_migrates_in_memory_and_emits_schema_three(self):
+        snapshot = complete_document().to_snapshot()
+        snapshot["schema_version"] = 2
+        del snapshot["features"]
+        del snapshot["rollback_before"]
+        restored = n.Document.from_snapshot(snapshot)
+        self.assertEqual(restored.schema_version, 3)
+        self.assertEqual(restored.to_snapshot()["schema_version"], 3)
+        self.assertEqual(restored.to_snapshot()["sketches"], snapshot["sketches"])
+        self.assertEqual(restored.to_snapshot()["features"], [])
+        self.assertIsNone(restored.rollback_before)
+        self.assertEqual(restored.revision, snapshot["revision"])
+
+    def test_feature_snapshot_round_trip_and_metadata(self):
+        document, profile_id, pocket_sketch_id, extrusion_id, pocket_id = feature_document()
+        snapshot = document.to_snapshot()
+        encoded = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+        restored = n.Document.from_snapshot(json.loads(encoded))
+        self.assertEqual(restored.to_snapshot(), snapshot)
+        self.assertEqual(restored.rollback_before, pocket_id)
+        self.assertEqual(len(restored.features), 2)
+
+        extrusion, pocket = restored.features
+        self.assertEqual((extrusion.id, extrusion.name, extrusion.version),
+                         (extrusion_id, "Base extrusion", 1))
+        self.assertEqual(extrusion.type, "extrusion")
+        self.assertEqual(extrusion.sketch_id, profile_id)
+        self.assertIsNone(extrusion.input_id)
+        self.assertEqual(extrusion.depth, "plate_width")
+        self.assertEqual(document.length_value(extrusion.depth), 32.5)
+        self.assertEqual(extrusion.body_id, pocket.body_id)
+
+        self.assertEqual((pocket.id, pocket.type, pocket.input_id, pocket.sketch_id),
+                         (pocket_id, "subtractive_extrusion", extrusion_id, pocket_sketch_id))
+        self.assertEqual(pocket.depth, 4.25)
+        self.assertTrue(pocket.suppressed)
+        self.assertIn(extrusion_id, pocket.dependencies)
+        self.assertIn(pocket_sketch_id, pocket.dependencies)
+        self.assertEqual(restored.get_feature(pocket_id).id, pocket_id)
+
+    def test_feature_depth_input_forms_and_record_shapes(self):
+        snapshot = feature_document()[0].to_snapshot()
+        extrusion, pocket = snapshot["features"]
+        self.assertEqual(set(extrusion), {"id", "name", "version", "type", "body",
+                                          "sketch", "input", "depth", "suppressed"})
+        self.assertEqual(extrusion["type"], "extrusion")
+        self.assertIsNone(extrusion["input"])
+        self.assertEqual(extrusion["depth"], {"parameter": "plate_width"})
+        self.assertEqual(pocket["type"], "subtractive_extrusion")
+        self.assertEqual(pocket["input"], extrusion["id"])
+        self.assertEqual(pocket["depth"], {"value_mm": 4.25})
+
+    def test_invalid_feature_records_and_references_are_rejected(self):
+        snapshot = feature_document()[0].to_snapshot()
+        mutations = [
+            lambda s: s["features"][0].update(unknown="field"),
+            lambda s: s["features"][0].update(input=identity(900)),
+            lambda s: s["features"][1].update(input=None),
+            lambda s: s["features"][0].update(type="fillet"),
+            lambda s: s["features"][0].update(body=identity(900)),
+            lambda s: s["features"][0].update(sketch=identity(900)),
+            lambda s: s["features"][0].update(depth={"value_mm": True}),
+            lambda s: s["features"][0].update(depth={"parameter": "missing"}),
+            lambda s: s["features"][0].update(depth={"value_mm": 1, "parameter": "plate_width"}),
+            lambda s: s["features"][0].update(suppressed=1),
+            lambda s: s["features"][0].update(version=0),
+            lambda s: s.update(rollback_before=identity(900)),
+        ]
+        for index, mutate in enumerate(mutations):
+            malformed = copy.deepcopy(snapshot)
+            mutate(malformed)
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                n.Document.from_snapshot(malformed)
+
+        duplicate = copy.deepcopy(snapshot)
+        duplicate["features"][0]["id"] = duplicate["document_id"]
+        with self.assertRaises(ValueError):
+            n.Document.from_snapshot(duplicate)
+
+    def test_feature_edits_and_dependency_rejections_are_atomic(self):
+        document, _, _, extrusion_id, pocket_id = feature_document()
+        before = document.to_snapshot()
+        failing_edits = [
+            lambda: document.reorder_features([pocket_id, extrusion_id]),
+            lambda: document.erase_feature(extrusion_id),
+            lambda: document.erase_feature(pocket_id),
+            lambda: document.erase_sketch(document.features[0].sketch_id),
+            lambda: document.set_feature_depth(extrusion_id, "not_a_parameter"),
+            lambda: document.set_rollback_before(identity(901)),
+        ]
+        for edit in failing_edits:
+            with self.assertRaises(ValueError):
+                edit()
+            self.assertEqual(document.to_snapshot(), before)
+
+        document.set_feature_depth(extrusion_id, "plate_width")
+        document.set_feature_suppressed(pocket_id, True)
+        document.set_rollback_before(pocket_id)
+        document.reorder_features([extrusion_id, pocket_id])
+        self.assertEqual(document.to_snapshot(), before)
+        document.erase_feature(pocket_id, cascade=True)
+        self.assertIsNone(document.rollback_before)
+        self.assertEqual([item.id for item in document.features], [extrusion_id])
+        self.assertEqual(len(document.sketches), 2)
+        self.assertEqual(document.revision, before["revision"] + 1)
+
+    def test_feature_revision_exhaustion_is_atomic(self):
+        original, profile, pocket_sketch, extrusion, pocket = feature_document()
+        snapshot = original.to_snapshot()
+        snapshot["revision"] = (1 << 64) - 1
+        document = n.Document.from_snapshot(snapshot)
+        edits = [lambda: document.add_extrusion("New", profile, 2),
+                 lambda: document.set_feature_depth(extrusion, 2),
+                 lambda: document.set_feature_suppressed(pocket, False),
+                 lambda: document.set_rollback_before(None),
+                 lambda: document.erase_feature(pocket, cascade=True),
+                 lambda: document.erase_sketch(pocket_sketch, cascade=True)]
+        for edit in edits:
+            with self.assertRaises(OverflowError):
+                edit()
+            self.assertEqual(document.to_snapshot(), snapshot)
 
     def test_future_document_and_sketch_versions_are_rejected(self):
         snapshot = complete_document().to_snapshot()
         future_document = copy.deepcopy(snapshot)
-        future_document["schema_version"] = 3
+        future_document["schema_version"] = 4
         with self.assertRaises(ValueError):
             n.Document.from_snapshot(future_document)
         future_sketch = copy.deepcopy(snapshot)
         future_sketch["sketches"][0]["version"] = 2
         with self.assertRaises(ValueError):
             n.Document.from_snapshot(future_sketch)
+
+        future_feature = feature_document()[0].to_snapshot()
+        future_feature["features"][0]["version"] = 2
+        with self.assertRaises(ValueError):
+            n.Document.from_snapshot(future_feature)
 
     def test_well_formed_conflicting_definitions_round_trip_without_solving(self):
         problem = populated_problem()

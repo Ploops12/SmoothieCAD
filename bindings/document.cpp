@@ -185,6 +185,54 @@ SketchProblem parse_sketch_problem(const py::dict& sketch) {
     return problem;
 }
 
+DepthInput parse_depth_argument(const py::handle& value) {
+    if (PyBool_Check(value.ptr())) invalid("feature depth must be a number or parameter name, not bool");
+    if (PyFloat_Check(value.ptr()) || PyLong_Check(value.ptr())) {
+        return as_number(value, "feature depth");
+    }
+    if (py::isinstance<py::str>(value)) return as_string(value, "feature depth parameter");
+    invalid("feature depth must be a number or parameter name");
+}
+
+DepthInput parse_depth_snapshot(const py::handle& value) {
+    const auto depth = as_dict(value, "feature depth");
+    if (depth.size() == 1 && depth.contains("value_mm")) {
+        return as_number(depth["value_mm"], "feature depth value_mm");
+    }
+    if (depth.size() == 1 && depth.contains("parameter")) {
+        return as_string(depth["parameter"], "feature depth parameter");
+    }
+    invalid("feature depth must contain exactly one of value_mm or parameter");
+}
+
+FeatureDefinition parse_feature_snapshot(const py::handle& value) {
+    const auto feature = as_dict(value, "feature");
+    require_fields(feature, {"id", "name", "version", "type", "body", "sketch",
+                             "input", "depth", "suppressed"}, "feature");
+    const auto version = as_version(feature["version"], "feature version");
+    if (version != 1) invalid("unsupported feature definition version");
+    const auto name = as_string(feature["name"], "feature name");
+    const auto type = as_string(feature["type"], "feature type");
+    const auto id = DocumentId::parse(as_string(feature["id"], "feature id"));
+    const auto body = DocumentId::parse(as_string(feature["body"], "feature body id"));
+    const auto sketch = DocumentId::parse(as_string(feature["sketch"], "feature sketch id"));
+    auto depth = parse_depth_snapshot(feature["depth"]);
+    if (!PyBool_Check(feature["suppressed"].ptr())) invalid("feature suppressed field must be a boolean");
+    const bool suppressed = py::cast<bool>(feature["suppressed"]);
+
+    if (type == "extrusion") {
+        if (!feature["input"].is_none()) invalid("extrusion input must be null");
+        return {id, name, version, body, ExtrusionFeature{sketch, std::move(depth)}, suppressed};
+    }
+    if (type == "subtractive_extrusion") {
+        if (feature["input"].is_none()) invalid("subtractive extrusion input must be a feature identity");
+        const auto input = DocumentId::parse(as_string(feature["input"], "feature input id"));
+        return {id, name, version, body,
+                SubtractiveExtrusionFeature{input, sketch, std::move(depth)}, suppressed};
+    }
+    invalid("unsupported feature type: " + type);
+}
+
 const char* constraint_name(SketchConstraintKind kind) {
     switch (kind) {
     case SketchConstraintKind::Coincident: return "coincident";
@@ -211,6 +259,40 @@ const char* element_name(SketchElement element) {
     case SketchElement::Origin: return "origin";
     }
     invalid("unknown sketch reference element");
+}
+
+py::object depth_value(const DepthInput& depth) {
+    if (const auto* value = std::get_if<double>(&depth)) return py::float_(*value);
+    return py::str(std::get<std::string>(depth));
+}
+
+py::dict depth_snapshot(const DepthInput& depth) {
+    py::dict result;
+    if (const auto* value = std::get_if<double>(&depth)) result["value_mm"] = *value;
+    else result["parameter"] = std::get<std::string>(depth);
+    return result;
+}
+
+py::dict feature_snapshot(const FeatureDefinition& feature) {
+    py::dict result;
+    result["id"] = feature.id.to_string();
+    result["name"] = feature.name;
+    result["version"] = feature.version;
+    result["type"] = feature_type(feature);
+    result["body"] = feature.body.to_string();
+    result["sketch"] = feature_sketch(feature).to_string();
+    if (const auto input = feature_input(feature)) result["input"] = input->to_string();
+    else result["input"] = py::none();
+    result["depth"] = depth_snapshot(feature_depth(feature));
+    result["suppressed"] = feature.suppressed;
+    return result;
+}
+
+std::vector<std::string> identity_strings(const std::vector<DocumentId>& identities) {
+    std::vector<std::string> result;
+    result.reserve(identities.size());
+    for (const auto& id : identities) result.push_back(id.to_string());
+    return result;
 }
 
 py::dict sketch_snapshot(const SketchDefinition& sketch) {
@@ -272,10 +354,14 @@ Document parse_snapshot(const py::object& raw) {
         if (schema == 1) {
             require_fields(snapshot, {"schema_version", "document_id", "revision",
                                       "geometric_tolerance_mm", "parameters"}, "schema 1 snapshot");
-        } else if (schema == Document::current_schema_version) {
+        } else if (schema == 2) {
             require_fields(snapshot, {"schema_version", "document_id", "revision",
                                       "geometric_tolerance_mm", "parameters", "sketches"},
-                           "document snapshot");
+                           "schema 2 snapshot");
+        } else if (schema == Document::current_schema_version) {
+            require_fields(snapshot, {"schema_version", "document_id", "revision",
+                                      "geometric_tolerance_mm", "parameters", "sketches",
+                                      "features", "rollback_before"}, "schema 3 snapshot");
         } else {
             invalid("unsupported BlenderCAD document schema version");
         }
@@ -291,7 +377,7 @@ Document parse_snapshot(const py::object& raw) {
         }
 
         std::vector<SketchDefinition> sketches;
-        if (schema == Document::current_schema_version) {
+        if (schema >= 2) {
             for (const auto& raw_sketch : as_list(snapshot["sketches"], "sketches")) {
                 const auto sketch = as_dict(raw_sketch, "sketch");
                 require_fields(sketch, {"id", "name", "version", "plane", "entities", "constraints"},
@@ -305,13 +391,26 @@ Document parse_snapshot(const py::object& raw) {
             }
         }
 
+        std::vector<FeatureDefinition> features;
+        std::optional<DocumentId> rollback_before;
+        if (schema == Document::current_schema_version) {
+            for (const auto& raw_feature : as_list(snapshot["features"], "features")) {
+                features.push_back(parse_feature_snapshot(raw_feature));
+            }
+            if (!snapshot["rollback_before"].is_none()) {
+                rollback_before = DocumentId::parse(as_string(snapshot["rollback_before"],
+                                                              "rollback_before"));
+            }
+        }
+
         return Document::restore(
             DocumentId::parse(as_string(required(snapshot, "document_id", "document snapshot"),
                                         "document id")),
             as_revision(required(snapshot, "revision", "document snapshot")),
             as_number(required(snapshot, "geometric_tolerance_mm", "document snapshot"),
                       "geometric tolerance"),
-            std::move(parameters), std::move(sketches));
+            std::move(parameters), std::move(sketches), std::move(features),
+            std::move(rollback_before));
     } catch (const py::error_already_set& error) {
         invalid(std::string("invalid document snapshot: ") + error.what());
     } catch (const py::cast_error& error) {
@@ -345,6 +444,31 @@ void bind_document(py::module_& module) {
             return sketch.problem;
         });
 
+    py::class_<FeatureDefinition>(module, "Feature")
+        .def_property_readonly("id", [](const FeatureDefinition& feature) {
+            return feature.id.to_string();
+        })
+        .def_readonly("name", &FeatureDefinition::name)
+        .def_readonly("version", &FeatureDefinition::version)
+        .def_property_readonly("type", &feature_type)
+        .def_property_readonly("body_id", [](const FeatureDefinition& feature) {
+            return feature.body.to_string();
+        })
+        .def_property_readonly("sketch_id", [](const FeatureDefinition& feature) {
+            return feature_sketch(feature).to_string();
+        })
+        .def_property_readonly("input_id", [](const FeatureDefinition& feature) -> py::object {
+            if (const auto input = feature_input(feature)) return py::str(input->to_string());
+            return py::none();
+        })
+        .def_property_readonly("depth", [](const FeatureDefinition& feature) {
+            return depth_value(feature_depth(feature));
+        })
+        .def_readonly("suppressed", &FeatureDefinition::suppressed)
+        .def_property_readonly("dependencies", [](const FeatureDefinition& feature) {
+            return identity_strings(feature_dependencies(feature));
+        });
+
     py::class_<Document>(module, "Document")
         .def(py::init<>())
         .def_property_readonly("id", [](const Document& document) {
@@ -359,8 +483,21 @@ void bind_document(py::module_& module) {
         .def_property_readonly("sketches", [](const Document& document) {
             return document.sketches();
         })
+        .def_property_readonly("features", [](const Document& document) {
+            return document.features();
+        })
+        .def_property_readonly("rollback_before", [](const Document& document) -> py::object {
+            if (document.rollback_before()) return py::str(document.rollback_before()->to_string());
+            return py::none();
+        })
         .def("get_sketch", [](const Document& document, const std::string& id) {
             return document.sketch(DocumentId::parse(id)).problem;
+        })
+        .def("get_feature", [](const Document& document, const std::string& id) {
+            return document.feature(DocumentId::parse(id));
+        })
+        .def("length_value", [](const Document& document, const py::object& value) {
+            return document.length_value(parse_depth_argument(value));
         })
         .def("set_geometric_tolerance_mm", &Document::set_geometric_tolerance_mm)
         .def("add_parameter", [](Document& document, std::string name, double value,
@@ -379,6 +516,48 @@ void bind_document(py::module_& module) {
                                   std::string name) {
             document.rename_sketch(DocumentId::parse(id), std::move(name));
         })
+        .def("add_extrusion", [](Document& document, std::string name, const std::string& sketch,
+                                 const py::object& depth) {
+            return document.add_extrusion(std::move(name), DocumentId::parse(sketch),
+                                          parse_depth_argument(depth)).to_string();
+        }, py::arg("name"), py::arg("sketch_id"), py::arg("depth"))
+        .def("add_subtractive_extrusion", [](Document& document, std::string name,
+                                              const std::string& input, const std::string& sketch,
+                                              const py::object& depth) {
+            return document.add_subtractive_extrusion(std::move(name), DocumentId::parse(input),
+                    DocumentId::parse(sketch), parse_depth_argument(depth)).to_string();
+        }, py::arg("name"), py::arg("input_id"), py::arg("sketch_id"), py::arg("depth"))
+        .def("set_feature_depth", [](Document& document, const std::string& id,
+                                      const py::object& depth) {
+            document.set_feature_depth(DocumentId::parse(id), parse_depth_argument(depth));
+        })
+        .def("set_feature_suppressed", [](Document& document, const std::string& id,
+                                           const py::object& suppressed) {
+            if (!PyBool_Check(suppressed.ptr())) invalid("suppressed must be a boolean");
+            document.set_feature_suppressed(DocumentId::parse(id), py::cast<bool>(suppressed));
+        })
+        .def("reorder_features", [](Document& document, const py::object& raw_order) {
+            std::vector<DocumentId> order;
+            for (const auto& raw_id : as_list(raw_order, "feature order")) {
+                order.push_back(DocumentId::parse(as_string(raw_id, "feature identity")));
+            }
+            document.reorder_features(order);
+        })
+        .def("set_rollback_before", [](Document& document, const py::object& raw_id) {
+            std::optional<DocumentId> id;
+            if (!raw_id.is_none()) id = DocumentId::parse(as_string(raw_id, "rollback feature identity"));
+            document.set_rollback_before(std::move(id));
+        })
+        .def("erase_feature", [](Document& document, const std::string& id,
+                                  const py::object& cascade) {
+            if (!PyBool_Check(cascade.ptr())) invalid("cascade must be a boolean");
+            document.erase_feature(DocumentId::parse(id), py::cast<bool>(cascade));
+        }, py::arg("id"), py::arg("cascade") = false)
+        .def("erase_sketch", [](Document& document, const std::string& id,
+                                 const py::object& cascade) {
+            if (!PyBool_Check(cascade.ptr())) invalid("cascade must be a boolean");
+            document.erase_sketch(DocumentId::parse(id), py::cast<bool>(cascade));
+        }, py::arg("id"), py::arg("cascade") = false)
         .def("to_snapshot", [](const Document& document) {
             py::dict snapshot;
             snapshot["schema_version"] = document.schema_version();
@@ -397,6 +576,11 @@ void bind_document(py::module_& module) {
             py::list sketches;
             for (const auto& sketch : document.sketches()) sketches.append(sketch_snapshot(sketch));
             snapshot["sketches"] = std::move(sketches);
+            py::list features;
+            for (const auto& feature : document.features()) features.append(feature_snapshot(feature));
+            snapshot["features"] = std::move(features);
+            if (document.rollback_before()) snapshot["rollback_before"] = document.rollback_before()->to_string();
+            else snapshot["rollback_before"] = py::none();
             return snapshot;
         })
         .def_static("from_snapshot", &parse_snapshot);

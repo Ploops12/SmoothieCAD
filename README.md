@@ -11,7 +11,7 @@ BlenderCAD is an ordinary Blender addon with a separate C++ computational core. 
 - `tests/`: focused geometry, sketch-solving, Blender persistence, and CMake cleanup checks.
 - `docs/`: architecture and build/dependency notes.
 
-The native core provides stable document IDs, schema-versioned snapshots, content revisions, named parameters with basic unit tags, and an OCCT adapter for primitives, arbitrary-plane extrusion, subtraction, validity/volume queries, bulk tessellation and STEP exchange. An embedded PlaneGCS adapter solves line/circle sketch constraints with typed targets and diagnostic identities. Documents own persistent sketch definitions with atomic edit/revision checks and schema migration. The addon can create a document and preserve its parameter/sketch snapshot in Blender scene properties. These are foundation APIs, not a user-facing feature history. Feature evaluation, topology provenance, and interactive modelling commands are not implemented yet.
+The native core provides stable IDs, versioned snapshots, atomic revisions, unit-tagged parameters, persistent sketches and extrusion/subtractive feature definitions. PlaneGCS solves sketch constraints; a revision-aware evaluator drives OCCT, caches unchanged results and retains explicitly stale displays on failure while blocking stale measurements/exports. Features support named length inputs, suppression, dependency-checked reorder/deletion and rollback. The addon preserves these definitions in Blender scene properties. These are foundation APIs: Solid presentation, topology provenance and interactive modelling commands are not implemented yet.
 
 ## Build and package
 
@@ -30,3 +30,5 @@ See [Build and dependencies](docs/build-and-dependencies.md) for dependency disc
 See [Geometry service and verification](docs/geometry-service.md) for native APIs and focused checks, and [Working-slice acceptance](docs/roadmap.md) for remaining milestone requirements.
 
 See [Document snapshots](docs/document-snapshots.md) for schema versions, sketch ownership, edit semantics and load failure behavior.
+
+See [Features and evaluation](docs/features-and-evaluation.md) for body ownership, dependency history, caching, failures and query/export guards.

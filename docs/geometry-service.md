@@ -13,7 +13,7 @@
 
 The adapter rejects null, invalid, and non-solid results before allocating a handle. Each adapter accepts a configurable geometric tolerance budget, defaulting to **0.001 mm**. Results with OCCT topology tolerances exceeding that budget are rejected; the budget is never silently increased. This check is not a general proof of geometric accuracy, nor a substitute for exchange-deviation validation. Display deflection is separate and does not change modeling tolerance.
 
-These are low-level kernel operations, not saved CAD features. A future evaluator must associate outputs with feature identities, document revisions and topology-change provenance. In particular, local face/edge indices must not enter saved references. There is no stale-result/export gate at the document level yet because feature evaluation has not been implemented.
+These are low-level kernel operations, not saved CAD features. The [feature evaluator](features-and-evaluation.md) now associates results with feature/body identities and document snapshots and guards current queries/exports. The low-level adapter alone has no document association. CAD topology-change provenance is not yet produced; local face/edge indices must not enter saved references.
 
 ## Bulk presentation data
 

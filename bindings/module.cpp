@@ -1,12 +1,12 @@
 #include "blendercad/document_id.hpp"
 #include "blendercad/geometry.hpp"
+#include "display.hpp"
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 #include <Standard_Failure.hxx>
 
-#include <cstring>
 #include <stdexcept>
 
 #ifndef BLENDERCAD_VERSION
@@ -16,13 +16,7 @@
 namespace py = pybind11;
 void bind_sketch(py::module_& module);
 void bind_document(py::module_& module);
-
-template <typename T>
-py::array_t<T> bulk_array(const std::vector<T>& values) {
-    py::array_t<T> array(values.size());
-    if (!values.empty()) std::memcpy(array.mutable_data(), values.data(), values.size() * sizeof(T));
-    return array;
-}
+void bind_evaluation(py::module_& module);
 
 PYBIND11_MODULE(_native, module) {
     module.doc() = "BlenderCAD native foundation";
@@ -77,15 +71,7 @@ PYBIND11_MODULE(_native, module) {
                 py::gil_scoped_release release;
                 display = geometry.tessellate(shape, linear_deflection_mm, angular_deflection_rad);
             }
-            py::dict arrays;
-            arrays["positions"] = bulk_array(display.positions);
-            arrays["triangles"] = bulk_array(display.triangles);
-            arrays["triangle_faces"] = bulk_array(display.triangle_faces);
-            arrays["edge_positions"] = bulk_array(display.edge_positions);
-            arrays["edge_offsets"] = bulk_array(display.edge_offsets);
-            arrays["cad_vertices"] = bulk_array(display.cad_vertices);
-            arrays["face_count"] = display.face_count;
-            return arrays;
+            return blendercad_bindings::display_arrays(display);
         })
         .def("volume_mm3", &blendercad::GeometryAdapter::volume_mm3)
         .def("is_valid", &blendercad::GeometryAdapter::is_valid)
@@ -95,4 +81,5 @@ PYBIND11_MODULE(_native, module) {
                py::arg("geometric_budget_mm") = 0.001);
     bind_sketch(module);
     bind_document(module);
+    bind_evaluation(module);
 }
