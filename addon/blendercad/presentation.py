@@ -145,6 +145,7 @@ class Runtime:
         self.scale = None
         self.packets = {}
         self.error = ""
+        self.last_pick = None
 
 
 _runtimes = {}
@@ -163,6 +164,7 @@ def invalidate_snapshot(scene, _context):
         invalid = copy.copy(state)
         invalid.serialized = None
         invalid.packets = {}
+        invalid.last_pick = None
         _runtimes[scene.as_pointer()] = invalid
 
 
@@ -493,6 +495,15 @@ def resolve(scene, host, kind, index, token):
     if kind not in counts or isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < counts[kind]:
         raise ValueError("Invalid evaluated CAD topology index")
     return Pick(arrays["document_id"], arrays["body_id"], arrays["feature_id"], arrays["revision"], token, kind, index)
+
+
+def persistent_target(scene, host, pick):
+    if pick is None or pick.body_id != host.get(BODY) or pick.document_id != host.get(DOC):
+        raise ValueError("Click a face on the active CAD Solid first")
+    current_packet(scene, host, pick.token)
+    state = runtime(scene)
+    return state.evaluator.capture_reference(state.document, pick.body_id,
+                                            getattr(_native.TopologyKind, pick.kind), pick.index)
 
 
 def pick_ray(scene, origin, direction, depsgraph=None):

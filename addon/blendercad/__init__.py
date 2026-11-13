@@ -91,6 +91,18 @@ def _classes():
                 row.label(text=feature.name)
                 operator = row.operator("blendercad.set_feature_depth", text="Depth")
                 operator.feature_id = feature.id
+            resolutions = {entry.reference_id: entry.resolution for entry in state.report.references} if state.report and state.serialized == serialized else {}
+            for reference in document.references:
+                box = self.layout.box()
+                resolution = resolutions.get(reference.id)
+                label = resolution.state.name.replace("_", " ").title() if resolution else "Needs recompute"
+                box.label(text=f"{reference.name}: {label}")
+                if resolution and resolution.state != _native.ReferenceState.RESOLVED:
+                    box.label(text=resolution.diagnostic, icon="ERROR")
+                operator = box.operator("blendercad.save_reference", text="Repair From Picked Face")
+                operator.reference_id = reference.id
+                operator = box.operator("blendercad.erase_reference", text="Remove Reference")
+                operator.reference_id = reference.id
             host = presentation.host_for(context.active_object)
             if host is not None:
                 box = self.layout.box()
@@ -101,6 +113,7 @@ def _classes():
                 if display is not None:
                     box.template_ID(display, "active_material", new="material.new")
                 box.operator("blendercad.duplicate_solid")
+                box.operator("blendercad.save_reference")
                 box.operator("blendercad.frame_solid")
                 box.operator("blendercad.delete_solid")
                 box.operator("blendercad.convert_to_regular_mesh")

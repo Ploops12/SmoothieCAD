@@ -129,6 +129,31 @@ class BLENDERCAD_OT_frame_solid(SolidOperator, bpy.types.Operator):
         frame_solids(context, p.selected_hosts(context))
 
 
+class BLENDERCAD_OT_save_reference(SolidOperator, bpy.types.Operator):
+    bl_idname = "blendercad.save_reference"
+    bl_label = "Save Picked Face Reference"
+    bl_description = "Save the picked CAD face's persistent construction identity, or explicitly repair an existing reference"
+    name: StringProperty(name="Reference name", default="Face reference")
+    reference_id: StringProperty(options={"HIDDEN"})
+
+    def invoke(self, context, event):
+        if self.reference_id:
+            return self.execute(context)
+        return context.window_manager.invoke_props_dialog(self)
+
+    def run(self, context):
+        commands.save_reference(context, self.name, self.reference_id)
+
+
+class BLENDERCAD_OT_erase_reference(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.erase_reference"
+    bl_label = "Remove CAD Reference"
+    reference_id: StringProperty(options={"HIDDEN"})
+
+    def run(self, context):
+        commands.erase_reference(context, self.reference_id)
+
+
 class BLENDERCAD_OT_delete_solid(SolidOperator, bpy.types.Operator):
     bl_idname = "blendercad.delete_solid"
     bl_label = "Delete CAD Solid"
@@ -177,13 +202,15 @@ class BLENDERCAD_OT_pick_solid(bpy.types.Operator):
                 obj.select_set(False)
         host.select_set(not host.select_get() if self.extend else True)
         context.view_layer.objects.active = host
+        p.runtime(context.scene).last_pick = _pick if host.select_get() else None
         return {"FINISHED"}
 
 
 _classes = (BLENDERCAD_OT_add_rectangle_solid, BLENDERCAD_OT_recompute,
             BLENDERCAD_OT_set_feature_depth, BLENDERCAD_OT_parameter,
             BLENDERCAD_OT_duplicate_solid, BLENDERCAD_OT_frame_solid, BLENDERCAD_OT_delete_solid,
-            BLENDERCAD_OT_convert_to_regular_mesh, BLENDERCAD_OT_pick_solid)
+            BLENDERCAD_OT_convert_to_regular_mesh, BLENDERCAD_OT_pick_solid,
+            BLENDERCAD_OT_save_reference, BLENDERCAD_OT_erase_reference)
 _keymaps = []
 _registered = []
 

@@ -88,9 +88,11 @@ extends selection. Interactive edge/vertex snapping/highlighting and precise
 analytic hit refinement are not implemented.
 
 **These picks are not persistent design references.** They must not be saved
-or fed into downstream CAD features as stable face/edge identities. A later
-reference service must translate feature provenance and OCCT topology-change
-relationships and expose split/merged/deleted/ambiguous repair states.
+or fed into downstream CAD features as stable face/edge identities. The
+[reference service](persistent-references.md) now translates a current pick
+into a construction-derived target and exposes split/merged/deleted/ambiguous/
+unavailable states. Save Picked Face Reference and Repair From Picked Face
+operate on these stable targets, not on saved display indices.
 
 Failed or blocked features retain their last-valid display and expose state
 and diagnostics in the selected Solid's sidebar. Stale displays have no current
@@ -113,6 +115,9 @@ Duplication copies the body feature chain and referenced sketch/entity/
 constraint definitions with fresh identities. Named parameters intentionally
 remain shared document-level inputs. It copies host placement and whole-body
 material. This is independent body duplication, not an assembly instance.
+Document-level named reference bookmarks remain on their original body when
+another body definition is duplicated; consuming feature inputs will require
+explicit clone/remap semantics when those feature types are implemented.
 Duplication while rolled back is rejected explicitly. Deletion removes the
 selected body chains with dependency-aware cascading; unused sketch definitions
 remain saved. Conversion requires current geometry, detaches the generated

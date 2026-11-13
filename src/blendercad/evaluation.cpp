@@ -1,5 +1,7 @@
 #include "blendercad/evaluation.hpp"
+#include "blendercad/reference_tracker.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -21,6 +23,7 @@ struct OwnedShape final {
     DocumentId feature;
     std::uint64_t revision;
     std::uint64_t generation;
+    std::shared_ptr<const TopologyReferences> references;
     ~OwnedShape() { try { kernel->release(handle); } catch (...) {} }
 };
 
@@ -41,24 +44,52 @@ struct CachedFeature final {
     std::optional<SketchSolveReport> sketch_report;
 };
 
-ShapeHandle extrude(GeometryAdapter& kernel, const SketchProblem& profile, double depth, double tolerance) {
+struct ProfileOutput final {
+    ShapeHandle handle;
+    std::vector<std::string> edges;
+    std::vector<std::vector<std::string>> vertices;
+};
+
+ProfileOutput extrude(GeometryAdapter& kernel, const SketchProblem& profile, double depth, double tolerance) {
     if (!std::isfinite(depth) || depth <= 0) throw std::runtime_error("Extrusion depth must be finite and positive");
     if (profile.entities.size() == 1) {
         if (const auto* circle = std::get_if<Circle2>(&profile.entities.front().geometry)) {
-            return kernel.extrude_circle(circle->center, circle->radius, profile.plane, depth);
+            const auto id = profile.entities.front().id.to_string();
+            std::vector<std::string> edges{id};
+            std::vector<std::vector<std::string>> vertices{{id + ":seam"}};
+            return {kernel.extrude_circle(circle->center, circle->radius, profile.plane, depth), std::move(edges), std::move(vertices)};
         }
     }
     if (profile.entities.size() < 3) throw std::runtime_error("Profile requires one circle or a closed line loop");
     std::vector<const Line2*> lines;
+    std::vector<std::string> identities;
     for (const auto& entity : profile.entities) {
         const auto* line = std::get_if<Line2>(&entity.geometry);
         if (!line) throw std::runtime_error("Mixed/multiple profile loops are not supported by this feature version");
         lines.push_back(line);
+        identities.push_back(entity.id.to_string());
     }
     auto near = [&](Point2 a, Point2 b) { return std::hypot(a.x - b.x, a.y - b.y) <= tolerance; };
+    bool open_junction = false;
+    for (std::size_t index = 0; index < lines.size(); ++index) {
+        for (const auto endpoint : {lines[index]->start, lines[index]->end}) {
+            std::size_t connections = 0;
+            for (std::size_t other = 0; other < lines.size(); ++other) {
+                if (index == other) continue;
+                connections += near(endpoint, lines[other]->start);
+                connections += near(endpoint, lines[other]->end);
+            }
+            if (connections > 1) throw std::runtime_error("Profile junction is ambiguous within the geometric budget");
+            open_junction = open_junction || connections == 0;
+        }
+    }
+    if (open_junction) throw std::runtime_error("Profile is open or contains disconnected geometry");
     std::vector<bool> used(lines.size(), false);
-    used[0] = true;
-    std::vector<Point2> points{lines[0]->start, lines[0]->end};
+    const auto first = static_cast<std::size_t>(std::min_element(identities.begin(), identities.end()) - identities.begin());
+    used[first] = true;
+    std::vector<Point2> points{lines[first]->start, lines[first]->end};
+    std::vector<std::string> edge_ids{identities[first]};
+    std::vector<std::vector<std::string>> vertex_ids{{identities[first] + ":start"}, {identities[first] + ":end"}};
     auto endpoint = points.back();
     for (std::size_t connected = 1; connected < lines.size(); ++connected) {
         std::optional<std::size_t> next;
@@ -73,12 +104,58 @@ ShapeHandle extrude(GeometryAdapter& kernel, const SketchProblem& profile, doubl
         }
         if (!next) throw std::runtime_error("Profile is open or contains disconnected loops");
         used[*next] = true;
+        vertex_ids.back().push_back(identities[*next] + (reverse ? ":end" : ":start"));
         endpoint = reverse ? lines[*next]->start : lines[*next]->end;
         points.push_back(endpoint);
+        edge_ids.push_back(identities[*next]);
+        vertex_ids.push_back({identities[*next] + (reverse ? ":start" : ":end")});
     }
     if (!near(endpoint, points.front())) throw std::runtime_error("Profile is open at its closing junction");
     points.pop_back(); // Closing endpoint shares the first vertex within budget.
-    return kernel.extrude_polygon(points, profile.plane, depth);
+    vertex_ids.front().insert(vertex_ids.front().end(), vertex_ids.back().begin(), vertex_ids.back().end());
+    vertex_ids.pop_back();
+    return {kernel.extrude_polygon(points, profile.plane, depth), std::move(edge_ids), std::move(vertex_ids)};
+}
+
+TopologyReferences name_profile(const GeometryTopology& topology, const ProfileOutput& profile, const DocumentId& feature) {
+    std::vector<NamedTopologySeed> names;
+    for (const auto& seed : topology.seeds) {
+        auto add = [&](std::string key) { names.push_back({seed.target, {feature, std::move(key)}}); };
+        switch (seed.role) {
+        case TopologySeedRole::StartCap: add("cap:start"); break;
+        case TopologySeedRole::EndCap: add("cap:end"); break;
+        case TopologySeedRole::Side: add("side:" + profile.edges.at(seed.profile_index)); break;
+        case TopologySeedRole::StartEdge: add("edge:start:" + profile.edges.at(seed.profile_index)); break;
+        case TopologySeedRole::EndEdge: add("edge:end:" + profile.edges.at(seed.profile_index)); break;
+        case TopologySeedRole::SweepEdge: case TopologySeedRole::StartVertex: case TopologySeedRole::EndVertex:
+            for (const auto& vertex : profile.vertices.at(seed.profile_index)) {
+                const std::string prefix = seed.role == TopologySeedRole::SweepEdge ? "edge:sweep:" :
+                                           seed.role == TopologySeedRole::StartVertex ? "vertex:start:" : "vertex:end:";
+                add(prefix + vertex);
+            }
+            break;
+        }
+    }
+    return TopologyReferences::seed(topology, names);
+}
+
+std::optional<DocumentId> source_entity(const PersistentReference& reference) {
+    const std::pair<std::string_view, TopologyKind> prefixes[] = {
+        {"side:", TopologyKind::Face}, {"edge:start:", TopologyKind::Edge}, {"edge:end:", TopologyKind::Edge},
+        {"edge:sweep:", TopologyKind::Edge}, {"vertex:start:", TopologyKind::Vertex}, {"vertex:end:", TopologyKind::Vertex}};
+    const std::string_view key = reference.anchor.key;
+    for (const auto& [prefix, kind] : prefixes) {
+        if (reference.kind != kind || !key.starts_with(prefix)) continue;
+        const auto source = key.substr(prefix.size());
+        if (source.size() < 36) return {};
+        const auto suffix = source.substr(36);
+        const bool vertex_role = prefix == "edge:sweep:" || kind == TopologyKind::Vertex;
+        if ((!vertex_role && !suffix.empty()) ||
+            (vertex_role && suffix != ":start" && suffix != ":end" && suffix != ":seam")) return {};
+        try { return DocumentId::parse(source.substr(0, 36)); }
+        catch (const std::invalid_argument&) { return {}; }
+    }
+    return {};
 }
 
 } // namespace
@@ -182,14 +259,17 @@ EvaluationReport FeatureEvaluator::evaluate(const Document& document) {
                         // with the same restored tolerance. Keep each Boolean's
                         // operands inside that adapter's handle namespace.
                         auto operation_kernel = input_shape ? input_shape->kernel : state.kernel;
-                        auto tool = state.own(operation_kernel,
-                            extrude(*operation_kernel, profile, depth, state.tolerance), feature.id, document.revision());
+                        const auto construction = extrude(*operation_kernel, profile, depth, state.tolerance);
+                        auto tool = state.own(operation_kernel, construction.handle, feature.id, document.revision());
+                        tool->references = std::make_shared<TopologyReferences>(name_profile(operation_kernel->topology(tool->handle), construction, feature.id));
                         auto result = tool;
                         if (input_shape) {
                             result = state.own(operation_kernel, operation_kernel->subtract(input_shape->handle, tool->handle), feature.id, document.revision());
                             if (operation_kernel->volume_mm3(result->handle) >= operation_kernel->volume_mm3(input_shape->handle)) {
                                 throw std::runtime_error("Subtraction did not remove material");
                             }
+                            result->references = std::make_shared<TopologyReferences>(TopologyReferences::operation(
+                                operation_kernel->topology(result->handle), *input_shape->references, *tool->references, feature.id));
                         }
                         cached.key = std::move(key);
                         cached.shape = std::move(result);
@@ -234,7 +314,43 @@ EvaluationReport FeatureEvaluator::evaluate(const Document& document) {
     std::erase_if(state.last_body_shapes, [&](const auto& item) { return !existing_bodies.contains(item.first); });
     state.document = document;
     state.report = report;
+    for (const auto& reference : document.references()) {
+        report.references.push_back({reference.id, resolve_reference(document, reference.target)});
+    }
+    state.report = report;
     return report;
+}
+
+PersistentReference FeatureEvaluator::capture_reference(const Document& document, const DocumentId& body,
+                                                       TopologyKind kind, std::uint32_t index) const {
+    (void)impl_->body(document, body, true);
+    const auto shape = impl_->displays.at(body.to_string());
+    PersistentReference reference{body, kind, shape->references->capture({kind, index})};
+    validate_reference(reference);
+    return reference;
+}
+
+ReferenceResolution FeatureEvaluator::resolve_reference(const Document& document, const PersistentReference& reference) const {
+    if (!matches_document(document) || !impl_->report) throw std::runtime_error("Document changed; recompute before resolving references");
+    validate_reference(reference);
+    const auto creator = std::ranges::find_if(document.features(), [&](const auto& feature) { return feature.id == reference.anchor.feature; });
+    if (creator == document.features().end()) return {ReferenceState::Deleted, {}, "Reference creator feature was deleted"};
+    if (creator->body != reference.body) throw std::invalid_argument("reference creator belongs to a different body");
+    const auto creation = std::ranges::find_if(impl_->report->features, [&](const auto& feature) { return feature.feature == reference.anchor.feature; });
+    if (creation == impl_->report->features.end() || creation->state != EvaluationState::UpToDate) {
+        return {ReferenceState::Unavailable, {}, "Reference creator is failed, blocked, suppressed or rolled back"};
+    }
+    const auto body = std::ranges::find_if(impl_->report->bodies, [&](const auto& body) { return body.body == reference.body; });
+    if (body == impl_->report->bodies.end() || body->state != EvaluationState::UpToDate) {
+        return {ReferenceState::Unavailable, {}, "Requested body has no current result at this history position"};
+    }
+    if (const auto source = source_entity(reference)) {
+        const auto& entities = document.sketch(feature_sketch(*creator)).problem.entities;
+        if (std::ranges::none_of(entities, [&](const auto& entity) { return entity.id == *source; })) {
+            return {ReferenceState::Deleted, {}, "Referenced source sketch entity was deleted; select a replacement to repair"};
+        }
+    }
+    return impl_->displays.at(reference.body.to_string())->references->resolve(reference.kind, reference.anchor);
 }
 
 double FeatureEvaluator::volume_mm3(const Document& document, const DocumentId& id) const {

@@ -32,14 +32,23 @@ void bind_evaluation(py::module_& module) {
         .def_readonly("revision", &EvaluationReport::revision)
         .def_property_readonly("features", [](const EvaluationReport& result) { return result.features; })
         .def_property_readonly("bodies", [](const EvaluationReport& result) { return result.bodies; })
+        .def_property_readonly("references", [](const EvaluationReport& result) { return result.references; })
         .def_readonly("computed_count", &EvaluationReport::computed_count)
         .def_readonly("reused_count", &EvaluationReport::reused_count);
+    py::class_<ReferenceEvaluation>(module, "ReferenceEvaluation")
+        .def_property_readonly("reference_id", [](const ReferenceEvaluation& result) { return result.reference.to_string(); })
+        .def_property_readonly("resolution", [](const ReferenceEvaluation& result) { return result.resolution; });
     py::class_<FeatureEvaluator>(module, "FeatureEvaluator")
         .def(py::init<>())
         .def("fork", &FeatureEvaluator::fork,
              "Create an isolated evaluator state sharing immutable cached geometry ownership.")
         .def("evaluate", &FeatureEvaluator::evaluate)
         .def("matches_document", &FeatureEvaluator::matches_document)
+        .def("capture_reference", [](const FeatureEvaluator& evaluator, const Document& document,
+                                     const std::string& body, TopologyKind kind, std::uint32_t index) {
+            return evaluator.capture_reference(document, DocumentId::parse(body), kind, index);
+        })
+        .def("resolve_reference", &FeatureEvaluator::resolve_reference)
         .def("volume_mm3", [](const FeatureEvaluator& evaluator, const Document& document, const std::string& body) {
             return evaluator.volume_mm3(document, DocumentId::parse(body));
         })

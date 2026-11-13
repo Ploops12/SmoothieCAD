@@ -86,6 +86,11 @@ def tick():
         elif step == 2:
             assert bpy.context.active_object is not None, "Click did not activate the Solid host"
             assert bpy.context.active_object.get(p.BODY) == host_id and bpy.context.active_object.type == "EMPTY"
+            assert p.runtime(scene).last_pick is not None, "Body click did not retain the CAD face pick"
+            with bpy.context.temp_override(area=area, region=region):
+                assert bpy.ops.blendercad.save_reference(name="UI face reference") == {"FINISHED"}
+            assert len(p.read_document(scene).references) == 1
+            assert p.runtime(scene).report.references[0].resolution.state == addon._native.ReferenceState.RESOLVED
             baseline = scene.blendercad_document_snapshot
             with bpy.context.temp_override(area=area, region=region):
                 bpy.ops.blendercad.add_rectangle_solid("INVOKE_DEFAULT")

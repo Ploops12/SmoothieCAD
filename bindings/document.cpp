@@ -233,6 +233,42 @@ FeatureDefinition parse_feature_snapshot(const py::handle& value) {
     invalid("unsupported feature type: " + type);
 }
 
+ReferenceDefinition parse_reference_snapshot(const py::handle& value) {
+    const auto reference = as_dict(value, "reference");
+    require_fields(reference, {"id", "name", "version", "body", "kind", "feature", "key"}, "reference");
+    if (as_version(reference["version"], "reference version") != 1) invalid("unsupported reference definition version");
+    const auto kind_name = as_string(reference["kind"], "reference kind");
+    TopologyKind kind;
+    if (kind_name == "face") kind = TopologyKind::Face;
+    else if (kind_name == "edge") kind = TopologyKind::Edge;
+    else if (kind_name == "vertex") kind = TopologyKind::Vertex;
+    else invalid("unsupported reference topology kind: " + kind_name);
+    return {DocumentId::parse(as_string(reference["id"], "reference id")),
+            as_string(reference["name"], "reference name"),
+            {DocumentId::parse(as_string(reference["body"], "reference body id")), kind,
+             {DocumentId::parse(as_string(reference["feature"], "reference feature id")),
+              as_string(reference["key"], "reference key")}}};
+}
+
+py::dict reference_snapshot(const ReferenceDefinition& reference) {
+    const char* kind;
+    switch (reference.target.kind) {
+    case TopologyKind::Face: kind = "face"; break;
+    case TopologyKind::Edge: kind = "edge"; break;
+    case TopologyKind::Vertex: kind = "vertex"; break;
+    default: invalid("invalid reference topology kind");
+    }
+    py::dict result;
+    result["id"] = reference.id.to_string();
+    result["name"] = reference.name;
+    result["version"] = 1;
+    result["body"] = reference.target.body.to_string();
+    result["kind"] = kind;
+    result["feature"] = reference.target.anchor.feature.to_string();
+    result["key"] = reference.target.anchor.key;
+    return result;
+}
+
 const char* constraint_name(SketchConstraintKind kind) {
     switch (kind) {
     case SketchConstraintKind::Coincident: return "coincident";
@@ -358,10 +394,14 @@ Document parse_snapshot(const py::object& raw) {
             require_fields(snapshot, {"schema_version", "document_id", "revision",
                                       "geometric_tolerance_mm", "parameters", "sketches"},
                            "schema 2 snapshot");
-        } else if (schema == Document::current_schema_version) {
+        } else if (schema == 3) {
             require_fields(snapshot, {"schema_version", "document_id", "revision",
                                       "geometric_tolerance_mm", "parameters", "sketches",
                                       "features", "rollback_before"}, "schema 3 snapshot");
+        } else if (schema == Document::current_schema_version) {
+            require_fields(snapshot, {"schema_version", "document_id", "revision",
+                                      "geometric_tolerance_mm", "parameters", "sketches",
+                                      "features", "rollback_before", "references"}, "schema 4 snapshot");
         } else {
             invalid("unsupported BlenderCAD document schema version");
         }
@@ -393,13 +433,20 @@ Document parse_snapshot(const py::object& raw) {
 
         std::vector<FeatureDefinition> features;
         std::optional<DocumentId> rollback_before;
-        if (schema == Document::current_schema_version) {
+        if (schema >= 3) {
             for (const auto& raw_feature : as_list(snapshot["features"], "features")) {
                 features.push_back(parse_feature_snapshot(raw_feature));
             }
             if (!snapshot["rollback_before"].is_none()) {
                 rollback_before = DocumentId::parse(as_string(snapshot["rollback_before"],
                                                               "rollback_before"));
+            }
+        }
+
+        std::vector<ReferenceDefinition> references;
+        if (schema >= 4) {
+            for (const auto& raw_reference : as_list(snapshot["references"], "references")) {
+                references.push_back(parse_reference_snapshot(raw_reference));
             }
         }
 
@@ -410,7 +457,7 @@ Document parse_snapshot(const py::object& raw) {
             as_number(required(snapshot, "geometric_tolerance_mm", "document snapshot"),
                       "geometric tolerance"),
             std::move(parameters), std::move(sketches), std::move(features),
-            std::move(rollback_before));
+            std::move(rollback_before), std::move(references));
     } catch (const py::error_already_set& error) {
         invalid(std::string("invalid document snapshot: ") + error.what());
     } catch (const py::cast_error& error) {
@@ -486,6 +533,9 @@ void bind_document(py::module_& module) {
         .def_property_readonly("features", [](const Document& document) {
             return document.features();
         })
+        .def_property_readonly("references", [](const Document& document) {
+            return document.references();
+        })
         .def_property_readonly("rollback_before", [](const Document& document) -> py::object {
             if (document.rollback_before()) return py::str(document.rollback_before()->to_string());
             return py::none();
@@ -496,6 +546,18 @@ void bind_document(py::module_& module) {
         .def("get_feature", [](const Document& document, const std::string& id) {
             return document.feature(DocumentId::parse(id));
         })
+        .def("get_reference", [](const Document& document, const std::string& id) {
+            return document.reference(DocumentId::parse(id));
+        })
+        .def("add_reference", [](Document& document, std::string name, const PersistentReference& target) {
+            return document.add_reference(std::move(name), target).to_string();
+        }, py::arg("name"), py::arg("target"))
+        .def("repair_reference", [](Document& document, const std::string& id, const PersistentReference& target) {
+            document.repair_reference(DocumentId::parse(id), target);
+        }, py::arg("id"), py::arg("target"))
+        .def("erase_reference", [](Document& document, const std::string& id) {
+            document.erase_reference(DocumentId::parse(id));
+        }, py::arg("id"))
         .def("length_value", [](const Document& document, const py::object& value) {
             return document.length_value(parse_depth_argument(value));
         })
@@ -581,6 +643,9 @@ void bind_document(py::module_& module) {
             snapshot["features"] = std::move(features);
             if (document.rollback_before()) snapshot["rollback_before"] = document.rollback_before()->to_string();
             else snapshot["rollback_before"] = py::none();
+            py::list references;
+            for (const auto& reference : document.references()) references.append(reference_snapshot(reference));
+            snapshot["references"] = std::move(references);
             return snapshot;
         })
         .def_static("from_snapshot", &parse_snapshot);

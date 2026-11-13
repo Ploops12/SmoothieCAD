@@ -65,6 +65,12 @@ def feature_document():
     return document, profile_id, pocket_sketch_id, extrusion_id, pocket_id
 
 
+def reference_target(document, feature_id, key="cap:start", kind=None):
+    return n.PersistentReference(document.get_feature(feature_id).body_id,
+                                 n.TopologyKind.FACE if kind is None else kind,
+                                 n.ReferenceAnchor(feature_id, key))
+
+
 class DocumentSnapshotChecks(unittest.TestCase):
     def test_every_constraint_and_target_kind_has_a_stable_snapshot(self):
         problem = populated_problem()
@@ -107,7 +113,7 @@ class DocumentSnapshotChecks(unittest.TestCase):
         self.assertEqual(restored.id, document.id)
         self.assertEqual([item.id for item in restored.sketches], [item["id"] for item in original["sketches"]])
 
-    def test_schema_one_migrates_in_memory_and_emits_schema_three(self):
+    def test_schema_one_migrates_in_memory_and_emits_schema_four(self):
         document = n.Document()
         document.add_parameter("height", 4.0, "mm")
         old_snapshot = document.to_snapshot()
@@ -115,24 +121,217 @@ class DocumentSnapshotChecks(unittest.TestCase):
         del old_snapshot["sketches"]
         del old_snapshot["features"]
         del old_snapshot["rollback_before"]
+        del old_snapshot["references"]
         restored = n.Document.from_snapshot(old_snapshot)
-        self.assertEqual(restored.schema_version, 3)
-        self.assertEqual(restored.to_snapshot()["schema_version"], 3)
+        self.assertEqual(restored.schema_version, 4)
+        self.assertEqual(restored.to_snapshot()["schema_version"], 4)
         self.assertEqual(restored.sketches, [])
+        self.assertEqual(restored.references, [])
         self.assertEqual(restored.revision, old_snapshot["revision"])
 
-    def test_schema_two_migrates_in_memory_and_emits_schema_three(self):
+    def test_schema_two_migrates_in_memory_and_emits_schema_four(self):
         snapshot = complete_document().to_snapshot()
         snapshot["schema_version"] = 2
         del snapshot["features"]
         del snapshot["rollback_before"]
+        del snapshot["references"]
         restored = n.Document.from_snapshot(snapshot)
-        self.assertEqual(restored.schema_version, 3)
-        self.assertEqual(restored.to_snapshot()["schema_version"], 3)
+        self.assertEqual(restored.schema_version, 4)
+        self.assertEqual(restored.to_snapshot()["schema_version"], 4)
         self.assertEqual(restored.to_snapshot()["sketches"], snapshot["sketches"])
         self.assertEqual(restored.to_snapshot()["features"], [])
         self.assertIsNone(restored.rollback_before)
+        self.assertEqual(restored.references, [])
         self.assertEqual(restored.revision, snapshot["revision"])
+
+    def test_schema_three_retains_features_and_migrates_empty_references(self):
+        document, _, _, extrusion, _ = feature_document()
+        document.add_reference("Stored only in schema four", reference_target(document, extrusion))
+        snapshot = document.to_snapshot()
+        snapshot["schema_version"] = 3
+        del snapshot["references"]
+        restored = n.Document.from_snapshot(snapshot)
+        self.assertEqual(restored.schema_version, 4)
+        self.assertEqual(restored.references, [])
+        self.assertEqual(restored.revision, snapshot["revision"])
+        upgraded = restored.to_snapshot()
+        del upgraded["references"]
+        upgraded["schema_version"] = 3
+        self.assertEqual(upgraded, snapshot)
+
+    def test_named_reference_round_trip_repair_and_copy_out(self):
+        document, _, _, extrusion, pocket = feature_document()
+        ids = [document.add_reference(name, reference_target(document, extrusion, key, kind))
+               for name, key, kind in (("Mounting face", "cap:start", n.TopologyKind.FACE),
+                                       ("Outer edge", "edge:start:source", n.TopologyKind.EDGE),
+                                       ("Corner", "vertex:start:source", n.TopologyKind.VERTEX))]
+        snapshot = document.to_snapshot()
+        self.assertEqual(snapshot["schema_version"], 4)
+        self.assertEqual(set(snapshot["references"][0]), {"id", "name", "version", "body", "kind", "feature", "key"})
+        self.assertEqual([item["kind"] for item in snapshot["references"]], ["face", "edge", "vertex"])
+        self.assertEqual(n.Document.from_snapshot(json.loads(json.dumps(snapshot))).to_snapshot(), snapshot)
+        stale_view = document.references[0]
+        self.assertEqual((stale_view.id, stale_view.name, stale_view.target.body_id,
+                          stale_view.target.anchor.feature_id, stale_view.target.anchor.key),
+                         (ids[0], "Mounting face", document.get_feature(extrusion).body_id, extrusion, "cap:start"))
+        document.repair_reference(ids[0], reference_target(document, extrusion))
+        self.assertEqual(document.to_snapshot(), snapshot, "No-op repair changed the revision")
+        document.repair_reference(ids[0], reference_target(document, pocket, "cap:end"))
+        self.assertEqual(document.revision, snapshot["revision"] + 1)
+        self.assertEqual(document.get_reference(ids[0]).target.anchor.feature_id, pocket)
+        self.assertEqual(stale_view.target.anchor.feature_id, extrusion, "Detached view changed or dangled after vector replacement")
+        self.assertEqual(document.get_reference(ids[0]).id, ids[0])
+        self.assertEqual(document.get_reference(ids[0]).name, "Mounting face")
+        document.erase_reference(ids[1])
+        self.assertEqual([reference.id for reference in document.references], [ids[0], ids[2]])
+        self.assertEqual(document.revision, snapshot["revision"] + 2)
+
+    def test_unknown_construction_keys_remain_saved_repairable_intent(self):
+        document, _, _, extrusion, pocket = feature_document()
+        reference = document.add_reference("Missing region", reference_target(document, extrusion, "future:well-formed:key"))
+        before = document.to_snapshot()["references"]
+        document.set_rollback_before(None)
+        document.set_feature_suppressed(pocket, False)
+        document.reorder_features([extrusion, pocket])
+        problem = document.get_sketch(document.features[0].sketch_id)
+        problem.plane.origin.x += 1
+        document.replace_sketch(document.features[0].sketch_id, problem)
+        self.assertEqual(document.to_snapshot()["references"], before)
+        self.assertEqual(document.get_reference(reference).target.anchor.key, "future:well-formed:key")
+
+    def test_reference_deletion_dependencies_and_cascades(self):
+        document, profile, pocket_profile, extrusion, pocket = feature_document()
+        document.set_rollback_before(None)
+        base_reference = document.add_reference("Base face", reference_target(document, extrusion))
+        pocket_reference = document.add_reference("Pocket face", reference_target(document, pocket))
+        before = document.to_snapshot()
+        with self.assertRaisesRegex(ValueError, "reference"):
+            document.erase_feature(pocket)
+        self.assertEqual(document.to_snapshot(), before)
+        document.erase_feature(pocket, cascade=True)
+        self.assertEqual([item.id for item in document.references], [base_reference])
+        self.assertEqual([item.id for item in document.features], [extrusion])
+        self.assertEqual(len(document.sketches), 2)
+        before = document.to_snapshot()
+        with self.assertRaisesRegex(ValueError, "reference"):
+            document.erase_feature(extrusion)
+        self.assertEqual(document.to_snapshot(), before)
+        document.erase_feature(extrusion, cascade=True)
+        self.assertEqual(document.references, [])
+        self.assertEqual(document.features, [])
+
+        document = n.Document.from_snapshot(before)
+        with self.assertRaises(ValueError):
+            document.erase_sketch(profile)
+        self.assertEqual(document.to_snapshot(), before)
+        document.erase_sketch(profile, cascade=True)
+        self.assertEqual(document.references, [])
+        self.assertEqual([item.id for item in document.sketches], [pocket_profile])
+        with self.assertRaises(ValueError):
+            document.get_reference(pocket_reference)
+
+    def test_reference_snapshot_validation_is_strict_and_global(self):
+        document, _, _, extrusion, _ = feature_document()
+        reference = document.add_reference("Top", reference_target(document, extrusion))
+        snapshot = document.to_snapshot()
+        mutations = [lambda r: r.update(version=True), lambda r: r.update(version=0),
+                     lambda r: r.update(version=2), lambda r: r.update(kind="FACE"),
+                     lambda r: r.update(kind=1), lambda r: r.update(body=identity(500)),
+                     lambda r: r.update(feature=identity(501)), lambda r: r.update(id="not-a-uuid"),
+                     lambda r: r.update(name=""), lambda r: r.update(name="hidden\x00name"),
+                     lambda r: r.update(key=""), lambda r: r.update(key="bad key"),
+                     lambda r: r.update(key=7), lambda r: r.update(key="x" * 65537),
+                     lambda r: r.update(transient_face_index=0)]
+        for index, mutate in enumerate(mutations):
+            malformed = copy.deepcopy(snapshot)
+            mutate(malformed["references"][0])
+            with self.subTest(case=index), self.assertRaises(ValueError):
+                n.Document.from_snapshot(malformed)
+        for key in snapshot["references"][0]:
+            malformed = copy.deepcopy(snapshot)
+            del malformed["references"][0][key]
+            with self.subTest(missing=key), self.assertRaises(ValueError):
+                n.Document.from_snapshot(malformed)
+        occupied = [snapshot["document_id"], snapshot["sketches"][0]["id"],
+                    snapshot["sketches"][0]["entities"][0]["id"], snapshot["features"][0]["id"],
+                    snapshot["features"][0]["body"]]
+        for identifier in occupied:
+            malformed = copy.deepcopy(snapshot)
+            malformed["references"][0]["id"] = identifier
+            with self.subTest(identifier=identifier), self.assertRaises(ValueError):
+                n.Document.from_snapshot(malformed)
+        duplicate = copy.deepcopy(snapshot)
+        duplicate["references"].append(copy.deepcopy(duplicate["references"][0]))
+        with self.assertRaises(ValueError):
+            n.Document.from_snapshot(duplicate)
+        malformed = copy.deepcopy(snapshot)
+        malformed["references"] = tuple(malformed["references"])
+        with self.assertRaises(ValueError):
+            n.Document.from_snapshot(malformed)
+
+        before = document.to_snapshot()
+        missing_feature = n.PersistentReference(document.features[0].body_id, n.TopologyKind.FACE,
+                                                n.ReferenceAnchor(identity(501), "cap:start"))
+        wrong_body = n.PersistentReference(identity(502), n.TopologyKind.FACE,
+                                           n.ReferenceAnchor(extrusion, "cap:start"))
+        for target in (missing_feature, wrong_body):
+            with self.assertRaises(ValueError):
+                document.repair_reference(reference, target)
+            self.assertEqual(document.to_snapshot(), before)
+            with self.assertRaises(ValueError):
+                document.add_reference("Invalid", target)
+            self.assertEqual(document.to_snapshot(), before)
+
+        # A valid body ID from another feature is not interchangeable with the
+        # anchor's lineage merely because both bodies exist in the document.
+        other_sketch = document.add_sketch("Independent body sketch", populated_problem(400))
+        other_feature = document.add_extrusion("Independent body", other_sketch, 2)
+        other_body = document.get_feature(other_feature).body_id
+        mismatched = n.PersistentReference(other_body, n.TopologyKind.FACE,
+                                           n.ReferenceAnchor(extrusion, "cap:start"))
+        before = document.to_snapshot()
+        with self.assertRaises(ValueError):
+            document.repair_reference(reference, mismatched)
+        self.assertEqual(document.to_snapshot(), before)
+
+    def test_legacy_schemas_do_not_silently_discard_new_reference_records(self):
+        document, _, _, extrusion, _ = feature_document()
+        document.add_reference("Saved face", reference_target(document, extrusion))
+        for schema in (1, 2, 3):
+            snapshot = document.to_snapshot()
+            snapshot["schema_version"] = schema
+            if schema < 3:
+                del snapshot["features"]
+                del snapshot["rollback_before"]
+            if schema < 2:
+                del snapshot["sketches"]
+            with self.subTest(schema=schema), self.assertRaises(ValueError):
+                n.Document.from_snapshot(snapshot)
+
+    def test_reference_revision_exhaustion_is_atomic(self):
+        document, _, _, extrusion, _ = feature_document()
+        target = reference_target(document, extrusion)
+        reference = document.add_reference("Top", target)
+        snapshot = document.to_snapshot()
+        snapshot["revision"] = (1 << 64) - 1
+        document = n.Document.from_snapshot(snapshot)
+        for edit in (lambda: document.add_reference("New", target),
+                     lambda: document.repair_reference(reference, reference_target(document, extrusion, "cap:end")),
+                     lambda: document.erase_reference(reference)):
+            with self.assertRaises(OverflowError):
+                edit()
+            self.assertEqual(document.to_snapshot(), snapshot)
+        document.repair_reference(reference, target)
+        self.assertEqual(document.to_snapshot(), snapshot)
+
+        # Cascading deletes span feature, rollback and reference definitions;
+        # revision exhaustion must reject the whole combined mutation.
+        profile_id = document.get_feature(extrusion).sketch_id
+        for edit in (lambda: document.erase_feature(extrusion, cascade=True),
+                     lambda: document.erase_sketch(profile_id, cascade=True)):
+            with self.assertRaises(OverflowError):
+                edit()
+            self.assertEqual(document.to_snapshot(), snapshot)
 
     def test_feature_snapshot_round_trip_and_metadata(self):
         document, profile_id, pocket_sketch_id, extrusion_id, pocket_id = feature_document()
@@ -246,7 +445,7 @@ class DocumentSnapshotChecks(unittest.TestCase):
     def test_future_document_and_sketch_versions_are_rejected(self):
         snapshot = complete_document().to_snapshot()
         future_document = copy.deepcopy(snapshot)
-        future_document["schema_version"] = 4
+        future_document["schema_version"] = 5
         with self.assertRaises(ValueError):
             n.Document.from_snapshot(future_document)
         future_sketch = copy.deepcopy(snapshot)

@@ -34,6 +34,8 @@ add_library(blendercad_core STATIC
     src/blendercad/document.cpp
     src/blendercad/sketch.cpp
     src/blendercad/feature.cpp
+    src/blendercad/reference.cpp
+    src/blendercad/reference_tracker.cpp
 )
 add_library(BlenderCAD::Core ALIAS blendercad_core)
 set_target_properties(blendercad_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -43,6 +45,12 @@ target_include_directories(blendercad_core
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_compile_features(blendercad_core PUBLIC cxx_std_20)
+
+if(BUILD_TESTING)
+    add_executable(reference_tracker_check tests/reference_tracker.cpp)
+    target_link_libraries(reference_tracker_check PRIVATE BlenderCAD::Core)
+    add_test(NAME reference_tracker COMMAND reference_tracker_check)
+endif()
 
 add_library(blendercad_sketch STATIC src/blendercad/sketch_planegcs.cpp)
 set_target_properties(blendercad_sketch PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -74,7 +82,7 @@ if(BLENDERCAD_BUILD_PYTHON)
     find_package(Python 3.14 EXACT COMPONENTS Interpreter Development.Module REQUIRED)
     blendercad_resolve_pybind11()
 
-    pybind11_add_module(_native MODULE bindings/module.cpp bindings/sketch.cpp bindings/document.cpp bindings/evaluation.cpp)
+    pybind11_add_module(_native MODULE bindings/module.cpp bindings/sketch.cpp bindings/document.cpp bindings/evaluation.cpp bindings/reference.cpp bindings/topology.cpp)
     target_link_libraries(_native PRIVATE BlenderCAD::Core)
     target_include_directories(_native PRIVATE ${OpenCASCADE_INCLUDE_DIR})
     target_compile_definitions(_native PRIVATE BLENDERCAD_VERSION="${PROJECT_VERSION}")
@@ -110,6 +118,13 @@ if(BLENDERCAD_BUILD_PYTHON)
                 --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/native_features.py"
                 -- --module-dir "$<TARGET_FILE_DIR:_native>"
         )
+        foreach(_reference_check IN ITEMS native_topology native_references)
+            add_test(NAME ${_reference_check}
+                COMMAND "${BLENDERCAD_BLENDER_EXECUTABLE}" --background --factory-startup
+                    --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/${_reference_check}.py"
+                    -- --module-dir "$<TARGET_FILE_DIR:_native>"
+            )
+        endforeach()
         add_test(NAME cmake_cleanup
             COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake_cleanup.py"
                 --cmake "${CMAKE_COMMAND}" --script "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Clean.cmake"
@@ -119,20 +134,20 @@ if(BLENDERCAD_BUILD_PYTHON)
                 --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/blender_foundation.py"
                 -- --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
         )
-        foreach(_blendercad_check IN ITEMS blender_solids blender_capabilities)
+        foreach(_blendercad_check IN ITEMS blender_solids blender_capabilities blender_references)
             add_test(NAME ${_blendercad_check}
                 COMMAND "${BLENDERCAD_BLENDER_EXECUTABLE}" --background --factory-startup
                     --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/${_blendercad_check}.py"
                     -- --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
             )
         endforeach()
-        set_tests_properties(native_geometry native_sketch document_snapshot native_features blender_foundation blender_solids blender_capabilities PROPERTIES
+        set_tests_properties(native_geometry native_sketch document_snapshot native_features native_topology native_references blender_foundation blender_solids blender_capabilities blender_references PROPERTIES
             ENVIRONMENT "ALSOFT_DRIVERS=null"
         )
         add_custom_target(check
             COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -C "$<CONFIG>"
             WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-            DEPENDS package_addon
+            DEPENDS package_addon reference_tracker_check
             USES_TERMINAL
         )
         find_program(BLENDERCAD_XVFB_RUN_EXECUTABLE NAMES xvfb-run)

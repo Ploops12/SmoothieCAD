@@ -5,6 +5,7 @@
 #include <string>
 
 #include "blendercad/geometry_types.hpp"
+#include "blendercad/topology.hpp"
 
 namespace blendercad {
 
@@ -32,6 +33,7 @@ public:
     [[nodiscard]] virtual double volume_mm3(ShapeHandle shape) const = 0;
     [[nodiscard]] virtual bool is_valid(ShapeHandle shape) const = 0;
     [[nodiscard]] virtual double max_tolerance_mm(ShapeHandle shape) const = 0;
+    [[nodiscard]] virtual GeometryTopology topology(ShapeHandle shape) const = 0;
     virtual void release(ShapeHandle shape) = 0;
 };
 

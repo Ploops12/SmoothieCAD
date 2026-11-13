@@ -61,7 +61,7 @@ double resolve_length(const DepthInput& input, const std::vector<Parameter>& par
 
 void validate_design(const DocumentId& id, const std::vector<Parameter>& parameters,
                      const std::vector<SketchDefinition>& sketches, const std::vector<FeatureDefinition>& features,
-                     const std::optional<DocumentId>& rollback_before) {
+                     const std::optional<DocumentId>& rollback_before, const std::vector<ReferenceDefinition>& references) {
     auto identities = validate_sketches(id, sketches);
     std::unordered_set<std::string> sketch_ids;
     for (const auto& sketch : sketches) sketch_ids.insert(sketch.id.to_string());
@@ -89,6 +89,14 @@ void validate_design(const DocumentId& id, const std::vector<Parameter>& paramet
         available.emplace(feature.id.to_string(), &feature);
     }
     if (rollback_before && !available.contains(rollback_before->to_string())) throw std::invalid_argument("rollback marker references a missing feature");
+    for (const auto& reference : references) {
+        insert(reference.id);
+        validate_name(reference.name);
+        validate_reference(reference.target);
+        const auto anchor = available.find(reference.target.anchor.feature.to_string());
+        if (anchor == available.end()) throw std::invalid_argument("reference anchors a missing feature");
+        if (anchor->second->body != reference.target.body) throw std::invalid_argument("reference body does not match its anchor feature");
+    }
 }
 
 } // namespace
@@ -116,7 +124,7 @@ Document::Document(DocumentId id) : id_(std::move(id)) {}
 Document Document::restore(DocumentId id, std::uint64_t revision,
                            double tolerance_mm, std::vector<Parameter> parameters,
                            std::vector<SketchDefinition> sketches, std::vector<FeatureDefinition> features,
-                           std::optional<DocumentId> rollback_before) {
+                           std::optional<DocumentId> rollback_before, std::vector<ReferenceDefinition> references) {
     validate_value(tolerance_mm);
     if (tolerance_mm <= 0.0) throw std::invalid_argument("geometric tolerance must be positive");
     for (std::size_t index = 0; index < parameters.size(); ++index) {
@@ -128,7 +136,7 @@ Document Document::restore(DocumentId id, std::uint64_t revision,
             throw std::invalid_argument("duplicate parameter name in document snapshot");
         }
     }
-    validate_design(id, parameters, sketches, features, rollback_before);
+    validate_design(id, parameters, sketches, features, rollback_before, references);
     Document document(std::move(id));
     document.revision_ = revision;
     document.geometric_tolerance_mm_ = tolerance_mm;
@@ -136,6 +144,7 @@ Document Document::restore(DocumentId id, std::uint64_t revision,
     document.sketches_ = std::move(sketches);
     document.features_ = std::move(features);
     document.rollback_before_ = std::move(rollback_before);
+    document.references_ = std::move(references);
     return document;
 }
 
@@ -192,12 +201,18 @@ void Document::publish_sketches(std::vector<SketchDefinition> sketches) {
 
 void Document::publish_design(std::vector<SketchDefinition> sketches, std::vector<FeatureDefinition> features,
                               std::optional<DocumentId> rollback_before) {
-    validate_design(id_, parameters_, sketches, features, rollback_before);
-    if (sketches == sketches_ && features == features_ && rollback_before == rollback_before_) return;
+    publish_design(std::move(sketches), std::move(features), std::move(rollback_before), references_);
+}
+
+void Document::publish_design(std::vector<SketchDefinition> sketches, std::vector<FeatureDefinition> features,
+                              std::optional<DocumentId> rollback_before, std::vector<ReferenceDefinition> references) {
+    validate_design(id_, parameters_, sketches, features, rollback_before, references);
+    if (sketches == sketches_ && features == features_ && rollback_before == rollback_before_ && references == references_) return;
     ensure_revision_available();
     sketches_ = std::move(sketches);
     features_ = std::move(features);
     rollback_before_ = std::move(rollback_before);
+    references_ = std::move(references);
     ++revision_;
 }
 
@@ -231,6 +246,34 @@ const FeatureDefinition& Document::feature(const DocumentId& id) const {
     const auto found = std::ranges::find_if(features_, [&](const auto& feature) { return feature.id == id; });
     if (found == features_.end()) throw std::invalid_argument("unknown feature identity: " + id.to_string());
     return *found;
+}
+
+const ReferenceDefinition& Document::reference(const DocumentId& id) const {
+    const auto found = std::ranges::find_if(references_, [&](const auto& reference) { return reference.id == id; });
+    if (found == references_.end()) throw std::invalid_argument("unknown reference identity: " + id.to_string());
+    return *found;
+}
+
+DocumentId Document::add_reference(std::string name, PersistentReference target) {
+    const auto id = DocumentId::generate();
+    auto candidate = references_;
+    candidate.push_back({id, std::move(name), std::move(target)});
+    publish_design(sketches_, features_, rollback_before_, std::move(candidate));
+    return id;
+}
+
+void Document::repair_reference(const DocumentId& id, PersistentReference target) {
+    (void)reference(id);
+    auto candidate = references_;
+    for (auto& reference : candidate) if (reference.id == id) reference.target = std::move(target);
+    publish_design(sketches_, features_, rollback_before_, std::move(candidate));
+}
+
+void Document::erase_reference(const DocumentId& id) {
+    (void)reference(id);
+    auto candidate = references_;
+    std::erase_if(candidate, [&](const auto& reference) { return reference.id == id; });
+    publish_design(sketches_, features_, rollback_before_, std::move(candidate));
 }
 
 double Document::length_value(const DepthInput& input) const { return resolve_length(input, parameters_); }
@@ -296,7 +339,13 @@ void Document::erase_feature(const DocumentId& id, bool cascade) {
         if (!cascade) throw std::invalid_argument("feature is the rollback marker; clear rollback or request cascade deletion");
         rollback.reset();
     }
-    publish_design(sketches_, std::move(candidate), std::move(rollback));
+    auto references = references_;
+    std::erase_if(references, [&](const auto& reference) {
+        if (!removed.contains(reference.target.anchor.feature.to_string())) return false;
+        if (!cascade) throw std::invalid_argument("feature has dependent reference: " + reference.id.to_string());
+        return true;
+    });
+    publish_design(sketches_, std::move(candidate), std::move(rollback), std::move(references));
 }
 
 void Document::erase_sketch(const DocumentId& id, bool cascade) {
@@ -314,7 +363,13 @@ void Document::erase_sketch(const DocumentId& id, bool cascade) {
     }
     auto rollback = rollback_before_;
     if (rollback && removed.contains(rollback->to_string())) rollback.reset();
-    publish_design(std::move(sketches), std::move(features), std::move(rollback));
+    auto references = references_;
+    std::erase_if(references, [&](const auto& reference) {
+        if (!removed.contains(reference.target.anchor.feature.to_string())) return false;
+        if (!cascade) throw std::invalid_argument("sketch has dependent reference: " + reference.id.to_string());
+        return true;
+    });
+    publish_design(std::move(sketches), std::move(features), std::move(rollback), std::move(references));
 }
 
 } // namespace blendercad

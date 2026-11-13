@@ -13,7 +13,7 @@
 
 The adapter rejects null, invalid, and non-solid results before allocating a handle. Each adapter accepts a configurable geometric tolerance budget, defaulting to **0.001 mm**. Results with OCCT topology tolerances exceeding that budget are rejected; the budget is never silently increased. This check is not a general proof of geometric accuracy, nor a substitute for exchange-deviation validation. Display deflection is separate and does not change modeling tolerance.
 
-These are low-level kernel operations, not saved CAD features. The [feature evaluator](features-and-evaluation.md) now associates results with feature/body identities and document snapshots and guards current queries/exports. The low-level adapter alone has no document association. CAD topology-change provenance is not yet produced; local face/edge indices must not enter saved references.
+These are low-level kernel operations, not saved CAD features. The [feature evaluator](features-and-evaluation.md) associates results with feature/body identities and document snapshots and guards current queries/exports. The low-level adapter alone has no document association. `topology(handle)` reports extrusion construction seeds and subtraction change relationships with evaluated-local typed indices; the [reference service](persistent-references.md) maps those inputs to persistent identities. Local indices themselves must not enter saved references.
 
 ## Bulk presentation data
 
@@ -29,7 +29,7 @@ These are low-level kernel operations, not saved CAD features. The [feature eval
 | `edge_offsets` | uint64 | Start/end offsets in points for each evaluated CAD edge; length is edge count + 1 |
 | `cad_vertices` | float64 | One XYZ triple per evaluated CAD vertex |
 
-Face, edge and vertex indices refer only to that evaluated shape. The presentation publisher must attach its source revision and discard obsolete picks. Edge ranges preserve zero-length entries for degenerate edges. A topology/geometry copy is meshed so tessellation caches cannot mutate the authoritative shape. Native tessellation releases the Python GIL and never touches Blender data.
+Face, edge and vertex indices refer only to that evaluated shape. The presentation publisher must attach its source revision and discard obsolete picks. Edge ranges preserve zero-length entries for degenerate edges. A topology/geometry copy is meshed so tessellation caches cannot mutate the authoritative shape. Copied elements map explicitly from the authoritative shape, retaining the original accumulated face orientation. Native tessellation releases the Python GIL and never touches Blender data.
 
 STEP operations use fresh sessions and explicit writer units instead of changing global export-unit settings. Exchange registry/session work is serialized within this adapter. OCCT failures are translated to Python runtime errors; invalid caller inputs and invalid/released/foreign handles raise value errors.
 

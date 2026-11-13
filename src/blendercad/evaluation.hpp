@@ -27,6 +27,11 @@ struct BodyEvaluation final {
     bool has_display{};
 };
 
+struct ReferenceEvaluation final {
+    DocumentId reference;
+    ReferenceResolution resolution;
+};
+
 struct EvaluationReport final {
     DocumentId document;
     std::uint64_t revision{};
@@ -34,6 +39,7 @@ struct EvaluationReport final {
     std::vector<BodyEvaluation> bodies;
     std::size_t computed_count{};
     std::size_t reused_count{};
+    std::vector<ReferenceEvaluation> references;
 };
 
 struct EvaluatedDisplay final {
@@ -65,6 +71,9 @@ public:
     [[nodiscard]] EvaluationReport evaluate(const Document& document);
     [[nodiscard]] bool matches_document(const Document& document) const;
     [[nodiscard]] double volume_mm3(const Document& document, const DocumentId& body) const;
+    [[nodiscard]] PersistentReference capture_reference(const Document& document, const DocumentId& body,
+                                                        TopologyKind kind, std::uint32_t index) const;
+    [[nodiscard]] ReferenceResolution resolve_reference(const Document& document, const PersistentReference& reference) const;
     [[nodiscard]] EvaluatedDisplay tessellate(const Document& document, const DocumentId& body,
                                              double linear_deflection_mm, double angular_deflection_rad) const;
     void write_step(const Document& document, const DocumentId& body, const std::string& path) const;

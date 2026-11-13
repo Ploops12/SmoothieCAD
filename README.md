@@ -11,7 +11,7 @@ BlenderCAD is an ordinary Blender addon with a separate C++ computational core. 
 - `tests/`: geometry, sketch-solving, Solid/persistence, event-routing and CMake cleanup checks.
 - `docs/`: architecture and build/dependency notes.
 
-The native core provides stable IDs, versioned snapshots, atomic revisions, unit-tagged parameters, persistent sketches and extrusion/subtractive feature definitions. PlaneGCS solves sketch constraints; a revision-aware evaluator drives OCCT, caches unchanged results and retains explicitly stale displays on failure while blocking stale measurements/exports. Features support named length inputs, suppression, dependency-checked reorder/deletion and rollback. The addon preserves these definitions in Blender scene properties and presents bodies through non-mesh hosts with managed meshes. Numeric rectangle/depth/parameter commands, definition duplication, conversion, deletion and load/undo reconstruction work inside Blender. Persistent topology references and the complete interactive modelling workflow remain incomplete.
+The native core provides stable IDs, versioned snapshots, atomic revisions, unit-tagged parameters, persistent sketches and extrusion/subtractive feature definitions. PlaneGCS solves sketch constraints; a revision-aware evaluator drives OCCT, caches unchanged results and retains explicitly stale displays on failure while blocking stale measurements/exports. Features support named length inputs, suppression, dependency-checked reorder/deletion and rollback. Construction-based topology references now support explicit split/merged/deleted/ambiguous diagnostics and named-reference repair. The addon preserves definitions in Blender scene properties and presents bodies through non-mesh hosts with managed meshes. Numeric rectangle/depth/parameter commands, definition duplication, conversion, deletion and load/undo reconstruction work inside Blender. Reference-consuming features and the complete interactive modelling workflow remain incomplete.
 
 ## Build and package
 
@@ -34,3 +34,5 @@ See [Document snapshots](docs/document-snapshots.md) for schema versions, sketch
 See [Features and evaluation](docs/features-and-evaluation.md) for body ownership, dependency history, caching, failures and query/export guards.
 
 See [Managed Solid presentation](docs/solid-integration.md) for the Blender workflow, picking/materials, commands, undo and documented integration gaps.
+
+See [Persistent references](docs/persistent-references.md) for construction provenance, schema-4 identities, diagnostics, repair and current naming limits.

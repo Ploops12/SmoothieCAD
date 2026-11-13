@@ -97,6 +97,29 @@ def set_parameter(context, name, value, unit=None):
     return commit(context.scene, document)
 
 
+def save_reference(context, name, reference_id=""):
+    document, hosts = selected(context, "edit_definition")
+    host = p.host_for(context.active_object)
+    if host not in hosts:
+        raise ValueError("Select the CAD Solid containing the picked face")
+    state = p.runtime(context.scene)
+    target = p.persistent_target(context.scene, host, state.last_pick)
+    if reference_id:
+        document.repair_reference(reference_id, target)
+        result = reference_id
+    else:
+        result = document.add_reference(name, target)
+    commit(context.scene, document)
+    return result
+
+
+def erase_reference(context, reference_id):
+    capabilities.require_capability(context.selected_objects, "edit_definition")
+    document = p.read_document(context.scene)
+    document.erase_reference(reference_id)
+    return commit(context.scene, document)
+
+
 def _delete_definitions(document, bodies):
     roots = [feature.id for feature in document.features if feature.body_id in bodies and feature.input_id is None]
     if len(roots) != len(bodies):
@@ -141,6 +164,9 @@ def _clone_body(document, body_id):
         feature["name"] += " copy"
         snapshot["features"].append(feature)
     snapshot["revision"] += 1
+    # Named references are document-level bookmarks, not feature inputs yet.
+    # Preserve their original body targets; do not silently retarget them to the
+    # copy. Future consuming features must clone/remap their explicit inputs.
     # The native document validates all global identities, units and dependencies
     # before the cloned definitions can be published. Named parameters deliberately
     # remain shared document-level inputs, not copied Blender object properties.
