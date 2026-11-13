@@ -33,6 +33,8 @@ See [Document snapshots](docs/document-snapshots.md) for schema versions, sketch
 
 See [Parameter expressions](docs/parameter-expressions.md) for dimensional arithmetic, dependency validation, Blender editing and schema-5 definitions.
 
+See [Sketch dimensions](docs/sketch-dimensions.md) for parameter bindings, numeric dimension editing, solver resolution and schema-6 persistence.
+
 See [Features and evaluation](docs/features-and-evaluation.md) for body ownership, dependency history, caching, failures and query/export guards.
 
 See [Managed Solid presentation](docs/solid-integration.md) for the Blender workflow, picking/materials, commands, undo and documented integration gaps.

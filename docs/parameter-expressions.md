@@ -13,7 +13,7 @@ dependency graph. It has no Blender, OCCT or PlaneGCS dependency. This graph is
 distinct from simultaneous sketch constraint solving: a parameter reads other
 parameters, but cannot solve an equation backwards or depend on measured output
 geometry. A feature can use the resulting named length for its extrusion depth.
-Binding sketch constraint values to parameters remains a subsequent capability.
+[Sketch dimensions](sketch-dimensions.md) can also bind to named length parameters.
 
 The native APIs are `add_parameter(name, value, unit)`,
 `add_parameter_expression(name, expression, unit)`, `set_parameter_value(name,

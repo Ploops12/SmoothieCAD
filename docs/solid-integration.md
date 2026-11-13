@@ -25,6 +25,9 @@ and **Convert to Regular Mesh**. A depth may be a literal millimetre value or a
 named length parameter, which can itself have a unit-aware arithmetic
 [expression definition](parameter-expressions.md). Interactive sketch tools,
 face-based modelling and fillets remain pending.
+Rectangle width/height and existing sketch dimensions can now bind to length
+parameters through the [dimension controls](sketch-dimensions.md); editing an
+earlier profile recomputes its affected feature chain without rewriting its IDs.
 
 ## Ownership, units and publication
 

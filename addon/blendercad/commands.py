@@ -49,7 +49,7 @@ def _select(context, body_ids):
             context.view_layer.objects.active = host
 
 
-def rectangle_profile(width, height):
+def rectangle_profile(width, height, width_parameter="", height_parameter=""):
     if width <= 0 or height <= 0:
         raise ValueError("Rectangle dimensions must be positive")
     problem = n.SketchProblem()
@@ -60,19 +60,21 @@ def rectangle_profile(width, height):
     ref = lambda i, part: n.SketchReference(lines[i].id, part)
     constraints = [n.SketchConstraint(kind.COINCIDENT, [ref(i, element.LINE_END), ref((i + 1) % 4, element.LINE_START)]) for i in range(4)]
     constraints += [n.SketchConstraint(kind.HORIZONTAL if i % 2 == 0 else kind.VERTICAL, [ref(i, element.GEOMETRY)]) for i in range(4)]
-    constraints += [n.SketchConstraint(kind.LENGTH, [ref(0, element.GEOMETRY)], width),
-                    n.SketchConstraint(kind.LENGTH, [ref(1, element.GEOMETRY)], height),
+    constraints += [n.SketchConstraint(kind.LENGTH, [ref(0, element.GEOMETRY)], width, parameter=width_parameter or None),
+                    n.SketchConstraint(kind.LENGTH, [ref(1, element.GEOMETRY)], height, parameter=height_parameter or None),
                     n.SketchConstraint(kind.COINCIDENT, [ref(0, element.LINE_START), n.SketchReference()])]
     problem.entities, problem.constraints = lines, constraints
     return problem
 
 
-def add_rectangle(context, width, height, depth):
+def add_rectangle(context, width, height, depth, width_parameter="", height_parameter=""):
     capabilities.require_capability(context.selected_objects, "edit_definition")
     document = p.read_document(context.scene)
     if depth <= 0:
         raise ValueError("Extrusion depth must be positive")
-    sketch = document.add_sketch("Rectangle", rectangle_profile(width, height))
+    width = document.length_value(width_parameter) if width_parameter else width
+    height = document.length_value(height_parameter) if height_parameter else height
+    sketch = document.add_sketch("Rectangle", rectangle_profile(width, height, width_parameter, height_parameter))
     feature = document.add_extrusion("Rectangle extrusion", sketch, depth)
     body = document.get_feature(feature).body_id
     commit(context.scene, document)
@@ -84,6 +86,13 @@ def set_depth(context, feature_id, depth):
     capabilities.require_capability(context.selected_objects, "edit_definition")
     document = p.read_document(context.scene)
     document.set_feature_depth(feature_id, depth)
+    return commit(context.scene, document)
+
+
+def set_sketch_dimension(context, sketch_id, constraint_id, value):
+    capabilities.require_capability(context.selected_objects, "edit_definition")
+    document = p.read_document(context.scene)
+    document.set_sketch_dimension(sketch_id, constraint_id, value)
     return commit(context.scene, document)
 
 

@@ -3,6 +3,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <initializer_list>
@@ -117,7 +118,7 @@ py::list point2_snapshot(const Point2& point) {
     return result;
 }
 
-SketchProblem parse_sketch_problem(const py::dict& sketch) {
+SketchProblem parse_sketch_problem(const py::dict& sketch, bool allow_parameters = false) {
     const auto plane = as_dict(required(sketch, "plane", "sketch"), "sketch plane");
     require_fields(plane, {"origin", "x_axis", "y_axis"}, "sketch plane");
     SketchProblem problem;
@@ -145,7 +146,9 @@ SketchProblem parse_sketch_problem(const py::dict& sketch) {
 
     for (const auto& raw_constraint : as_list(required(sketch, "constraints", "sketch"), "constraints")) {
         const auto constraint = as_dict(raw_constraint, "constraint");
-        require_fields(constraint, {"id", "type", "targets", "value"}, "constraint");
+        const bool bound = allow_parameters && constraint.contains("parameter");
+        if (bound) require_fields(constraint, {"id", "type", "targets", "parameter"}, "parameter-bound constraint");
+        else require_fields(constraint, {"id", "type", "targets", "value"}, "literal constraint");
         const auto type = as_string(constraint["type"], "constraint type");
         SketchConstraintKind kind;
         if (type == "coincident") kind = SketchConstraintKind::Coincident;
@@ -162,7 +165,8 @@ SketchProblem parse_sketch_problem(const py::dict& sketch) {
         else invalid("unsupported sketch constraint type: " + type);
 
         SketchConstraint parsed{DocumentId::parse(as_string(constraint["id"], "constraint id")),
-                                kind, {}, as_number(constraint["value"], "constraint value")};
+                                kind, {}, bound ? 0.0 : as_number(constraint["value"], "constraint value")};
+        if (bound) parsed.parameter = as_string(constraint["parameter"], "constraint parameter");
         for (const auto& raw_target : as_list(constraint["targets"], "constraint targets")) {
             const auto target = as_dict(raw_target, "constraint target");
             require_fields(target, {"entity", "element"}, "constraint target");
@@ -185,13 +189,13 @@ SketchProblem parse_sketch_problem(const py::dict& sketch) {
     return problem;
 }
 
-DepthInput parse_depth_argument(const py::handle& value) {
-    if (PyBool_Check(value.ptr())) invalid("feature depth must be a number or parameter name, not bool");
+DepthInput parse_depth_argument(const py::handle& value, const std::string& context = "feature depth") {
+    if (PyBool_Check(value.ptr())) invalid(context + " must be a number or parameter name, not bool");
     if (PyFloat_Check(value.ptr()) || PyLong_Check(value.ptr())) {
-        return as_number(value, "feature depth");
+        return as_number(value, context.c_str());
     }
-    if (py::isinstance<py::str>(value)) return as_string(value, "feature depth parameter");
-    invalid("feature depth must be a number or parameter name");
+    if (py::isinstance<py::str>(value)) return as_string(value, (context + " parameter").c_str());
+    invalid(context + " must be a number or parameter name");
 }
 
 DepthInput parse_depth_snapshot(const py::handle& value) {
@@ -335,7 +339,8 @@ py::dict sketch_snapshot(const SketchDefinition& sketch) {
     py::dict result;
     result["id"] = sketch.id.to_string();
     result["name"] = sketch.name;
-    result["version"] = 1;
+    result["version"] = std::ranges::any_of(sketch.problem.constraints,
+        [](const auto& constraint) { return constraint.parameter.has_value(); }) ? 2 : 1;
 
     py::dict plane;
     plane["origin"] = vector3_snapshot(sketch.problem.plane.origin);
@@ -366,7 +371,8 @@ py::dict sketch_snapshot(const SketchDefinition& sketch) {
         py::dict item;
         item["id"] = constraint.id.to_string();
         item["type"] = constraint_name(constraint.kind);
-        item["value"] = constraint.value;
+        if (constraint.parameter) item["parameter"] = *constraint.parameter;
+        else item["value"] = constraint.value;
         py::list targets;
         for (const auto& target : constraint.targets) {
             py::dict reference;
@@ -398,7 +404,7 @@ Document parse_snapshot(const py::object& raw) {
             require_fields(snapshot, {"schema_version", "document_id", "revision",
                                       "geometric_tolerance_mm", "parameters", "sketches",
                                       "features", "rollback_before"}, "schema 3 snapshot");
-        } else if (schema == 4 || schema == Document::current_schema_version) {
+        } else if (schema == 4 || schema == 5 || schema == Document::current_schema_version) {
             require_fields(snapshot, {"schema_version", "document_id", "revision",
                                       "geometric_tolerance_mm", "parameters", "sketches",
                                       "features", "rollback_before", "references"}, "document snapshot");
@@ -429,10 +435,11 @@ Document parse_snapshot(const py::object& raw) {
                 const auto sketch = as_dict(raw_sketch, "sketch");
                 require_fields(sketch, {"id", "name", "version", "plane", "entities", "constraints"},
                                "sketch");
-                if (as_version(sketch["version"], "sketch version") != 1) {
+                const auto version = as_version(sketch["version"], "sketch version");
+                if (version != 1 && !(schema >= 6 && version == 2)) {
                     invalid("unsupported sketch definition version");
                 }
-                SketchProblem problem = parse_sketch_problem(sketch);
+                SketchProblem problem = parse_sketch_problem(sketch, version == 2);
                 sketches.push_back({DocumentId::parse(as_string(sketch["id"], "sketch id")),
                                     as_string(sketch["name"], "sketch name"), std::move(problem)});
             }
@@ -581,6 +588,14 @@ void bind_document(py::module_& module) {
         }, py::arg("name"), py::arg("expression"), py::arg("unit") = "unitless")
         .def("set_parameter_expression", &Document::set_parameter_expression,
              py::arg("name"), py::arg("expression"))
+        .def("evaluated_sketch", [](const Document& document, const std::string& id) {
+            return document.evaluated_sketch(DocumentId::parse(id));
+        }, py::arg("sketch_id"))
+        .def("set_sketch_dimension", [](Document& document, const std::string& sketch,
+                                        const std::string& constraint, const py::object& value) {
+            document.set_sketch_dimension(DocumentId::parse(sketch), DocumentId::parse(constraint),
+                                          parse_depth_argument(value, "sketch dimension"));
+        }, py::arg("sketch_id"), py::arg("constraint_id"), py::arg("value"))
         .def("add_sketch", [](Document& document, std::string name, const SketchProblem& problem) {
             return document.add_sketch(std::move(name), problem).to_string();
         })

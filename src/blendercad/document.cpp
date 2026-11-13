@@ -33,7 +33,35 @@ void validate_unit(ParameterUnit unit) {
     throw std::invalid_argument("invalid parameter unit");
 }
 
-std::unordered_set<std::string> validate_sketches(const DocumentId& document_id, const std::vector<SketchDefinition>& sketches) {
+void normalize_sketch_parameters(SketchProblem& problem) {
+    for (auto& constraint : problem.constraints) {
+        if (constraint.parameter) constraint.value = 0;
+    }
+}
+
+std::string sketch_dimension_context(const SketchDefinition& sketch, const SketchConstraint& constraint) {
+    auto result = "sketch '" + sketch.name + "' (" + sketch.id.to_string()
+        + "), constraint " + constraint.id.to_string();
+    if (constraint.parameter) result += ", parameter '" + *constraint.parameter + "'";
+    return result + ": ";
+}
+
+double resolve_sketch_parameter(const SketchDefinition& sketch, const SketchConstraint& constraint,
+                                const std::vector<Parameter>& parameters) {
+    const auto& name = *constraint.parameter;
+    const auto found = std::ranges::find_if(parameters, [&](const auto& parameter) { return parameter.name == name; });
+    if (found == parameters.end()) {
+        throw std::invalid_argument(sketch_dimension_context(sketch, constraint) + "unknown dimension parameter");
+    }
+    if (found->unit != ParameterUnit::Millimetre) {
+        throw std::invalid_argument(sketch_dimension_context(sketch, constraint) + "sketch dimensions require a length parameter in mm");
+    }
+    return found->value;
+}
+
+std::unordered_set<std::string> validate_sketches(const DocumentId& document_id,
+                                               const std::vector<SketchDefinition>& sketches,
+                                               const std::vector<Parameter>& parameters) {
     std::unordered_set<std::string> identities{document_id.to_string()};
     auto insert = [&](const DocumentId& id) {
         if (!identities.insert(id.to_string()).second) throw std::invalid_argument("duplicate persistent identity in document: " + id.to_string());
@@ -41,9 +69,14 @@ std::unordered_set<std::string> validate_sketches(const DocumentId& document_id,
     for (const auto& sketch : sketches) {
         insert(sketch.id);
         validate_name(sketch.name);
-        validate_sketch(sketch.problem);
+        validate_sketch(sketch.problem, true);
         for (const auto& entity : sketch.problem.entities) insert(entity.id);
-        for (const auto& constraint : sketch.problem.constraints) insert(constraint.id);
+        for (const auto& constraint : sketch.problem.constraints) {
+            insert(constraint.id);
+            // Range/feasibility belongs to evaluation. Invalid currently
+            // resolved dimensions remain repairable persistent definitions.
+            if (constraint.parameter) (void)resolve_sketch_parameter(sketch, constraint, parameters);
+        }
     }
     return identities;
 }
@@ -63,7 +96,7 @@ double resolve_length(const DepthInput& input, const std::vector<Parameter>& par
 void validate_design(const DocumentId& id, const std::vector<Parameter>& parameters,
                      const std::vector<SketchDefinition>& sketches, const std::vector<FeatureDefinition>& features,
                      const std::optional<DocumentId>& rollback_before, const std::vector<ReferenceDefinition>& references) {
-    auto identities = validate_sketches(id, sketches);
+    auto identities = validate_sketches(id, sketches, parameters);
     std::unordered_set<std::string> sketch_ids;
     for (const auto& sketch : sketches) sketch_ids.insert(sketch.id.to_string());
     std::unordered_map<std::string, const FeatureDefinition*> available;
@@ -140,6 +173,7 @@ Document Document::restore(DocumentId id, std::uint64_t revision,
         }
     }
     resolve_parameter_expressions(parameters);
+    for (auto& sketch : sketches) normalize_sketch_parameters(sketch.problem);
     validate_design(id, parameters, sketches, features, rollback_before, references);
     Document document(std::move(id));
     document.revision_ = revision;
@@ -232,6 +266,27 @@ const SketchDefinition& Document::sketch(const DocumentId& id) const {
     return *found;
 }
 
+SketchProblem Document::evaluated_sketch(const DocumentId& id) const {
+    const auto& definition = sketch(id);
+    auto resolved = definition.problem;
+    for (auto& constraint : resolved.constraints) {
+        if (!constraint.parameter) continue;
+        constraint.value = resolve_sketch_parameter(definition, constraint, parameters_);
+        try { validate_sketch_constraint_value(constraint.kind, constraint.value); }
+        catch (const std::invalid_argument& error) {
+            throw std::invalid_argument(sketch_dimension_context(definition, constraint) + error.what());
+        }
+        constraint.parameter.reset();
+    }
+    // Retain the solver-facing validation boundary even when no bindings are
+    // present. Entity/constraint identities and initial geometry are unchanged.
+    try { validate_sketch(resolved); }
+    catch (const std::invalid_argument& error) {
+        throw std::invalid_argument("sketch '" + definition.name + "' (" + id.to_string() + "): " + error.what());
+    }
+    return resolved;
+}
+
 void Document::publish_sketches(std::vector<SketchDefinition> sketches) {
     publish_design(std::move(sketches), features_, rollback_before_);
 }
@@ -243,6 +298,7 @@ void Document::publish_design(std::vector<SketchDefinition> sketches, std::vecto
 
 void Document::publish_design(std::vector<SketchDefinition> sketches, std::vector<FeatureDefinition> features,
                               std::optional<DocumentId> rollback_before, std::vector<ReferenceDefinition> references) {
+    for (auto& sketch : sketches) normalize_sketch_parameters(sketch.problem);
     validate_design(id_, parameters_, sketches, features, rollback_before, references);
     if (sketches == sketches_ && features == features_ && rollback_before == rollback_before_ && references == references_) return;
     ensure_revision_available();
@@ -266,6 +322,34 @@ void Document::replace_sketch(const DocumentId& id, SketchProblem problem) {
     auto candidate = sketches_;
     for (auto& sketch : candidate) {
         if (sketch.id == id) sketch.problem = std::move(problem);
+    }
+    publish_sketches(std::move(candidate));
+}
+
+void Document::set_sketch_dimension(const DocumentId& sketch_id, const DocumentId& constraint_id, DepthInput value) {
+    const auto& definition = sketch(sketch_id);
+    const auto found = std::ranges::find_if(definition.problem.constraints, [&](const auto& constraint) {
+        return constraint.id == constraint_id;
+    });
+    if (found == definition.problem.constraints.end()) {
+        throw std::invalid_argument("unknown constraint " + constraint_id.to_string() + " in sketch " + sketch_id.to_string());
+    }
+    if (!is_sketch_dimension(found->kind)) {
+        throw std::invalid_argument(sketch_dimension_context(definition, *found) + "target is not a dimensional constraint");
+    }
+    auto candidate = sketches_;
+    for (auto& sketch : candidate) {
+        if (sketch.id != sketch_id) continue;
+        for (auto& constraint : sketch.problem.constraints) {
+            if (constraint.id != constraint_id) continue;
+            if (const auto* literal = std::get_if<double>(&value)) {
+                constraint.value = *literal;
+                constraint.parameter.reset();
+            } else {
+                constraint.parameter = std::get<std::string>(std::move(value));
+                constraint.value = 0;
+            }
+        }
     }
     publish_sketches(std::move(candidate));
 }

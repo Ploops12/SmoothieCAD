@@ -49,12 +49,23 @@ class BLENDERCAD_OT_add_rectangle_solid(CadOperator, bpy.types.Operator):
     width_mm: FloatProperty(name="Width (mm)", default=30, min=0.001)
     height_mm: FloatProperty(name="Height (mm)", default=20, min=0.001)
     depth_mm: FloatProperty(name="Depth (mm)", default=5, min=0.001)
+    width_parameter: StringProperty(name="Width parameter", description="Optional named length parameter instead of numeric width")
+    height_parameter: StringProperty(name="Height parameter", description="Optional named length parameter instead of numeric height")
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
 
+    def draw(self, context):
+        for axis in ("width", "height"):
+            self.layout.prop(self, f"{axis}_parameter")
+            row = self.layout.row()
+            row.enabled = not getattr(self, f"{axis}_parameter")
+            row.prop(self, f"{axis}_mm")
+        self.layout.prop(self, "depth_mm")
+
     def run(self, context):
-        commands.add_rectangle(context, self.width_mm, self.height_mm, self.depth_mm)
+        commands.add_rectangle(context, self.width_mm, self.height_mm, self.depth_mm,
+                               self.width_parameter, self.height_parameter)
         frame_solids(context, p.selected_hosts(context))
 
 
@@ -88,6 +99,40 @@ class BLENDERCAD_OT_set_feature_depth(CadOperator, bpy.types.Operator):
 
     def run(self, context):
         commands.set_depth(context, self.feature_id, self.parameter if self.parameter else self.depth_mm)
+
+
+class BLENDERCAD_OT_set_sketch_dimension(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.set_sketch_dimension"
+    bl_label = "Edit Sketch Dimension"
+    bl_description = "Change a sketch's dimension or bind it to a named length parameter"
+    sketch_id: StringProperty(options={"HIDDEN"})
+    constraint_id: StringProperty(options={"HIDDEN"})
+    value_mm: FloatProperty(name="Value (mm)")
+    parameter: StringProperty(name="Length parameter", description="Leave empty to use a literal dimension; arithmetic belongs in the parameter definition")
+
+    def invoke(self, context, event):
+        try:
+            document = p.read_document(context.scene)
+            constraint = next((item for item in document.get_sketch(self.sketch_id).constraints
+                               if item.id == self.constraint_id), None)
+            if constraint is None:
+                raise ValueError("Sketch constraint no longer exists")
+            self.parameter = constraint.parameter or ""
+            self.value_mm = document.length_value(self.parameter) if self.parameter else constraint.value
+        except (ValueError, KeyError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        self.layout.prop(self, "parameter")
+        row = self.layout.row()
+        row.enabled = not self.parameter
+        row.prop(self, "value_mm")
+
+    def run(self, context):
+        commands.set_sketch_dimension(context, self.sketch_id, self.constraint_id,
+                                     self.parameter if self.parameter else self.value_mm)
 
 
 class BLENDERCAD_OT_parameter(CadOperator, bpy.types.Operator):
@@ -233,7 +278,7 @@ class BLENDERCAD_OT_pick_solid(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (BLENDERCAD_OT_add_rectangle_solid, BLENDERCAD_OT_recompute,
+_classes = (BLENDERCAD_OT_add_rectangle_solid, BLENDERCAD_OT_recompute, BLENDERCAD_OT_set_sketch_dimension,
             BLENDERCAD_OT_set_feature_depth, BLENDERCAD_OT_parameter,
             BLENDERCAD_OT_duplicate_solid, BLENDERCAD_OT_frame_solid, BLENDERCAD_OT_delete_solid,
             BLENDERCAD_OT_convert_to_regular_mesh, BLENDERCAD_OT_pick_solid,

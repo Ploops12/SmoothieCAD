@@ -36,7 +36,7 @@ struct Parameter final {
 // held by GeometryAdapter and are not part of this snapshot.
 class Document final {
 public:
-    static constexpr std::uint32_t current_schema_version = 5;
+    static constexpr std::uint32_t current_schema_version = 6;
     static constexpr double default_geometric_tolerance_mm = 0.001;
 
     Document();
@@ -55,6 +55,7 @@ public:
     [[nodiscard]] const std::vector<Parameter>& parameters() const noexcept { return parameters_; }
     [[nodiscard]] const std::vector<SketchDefinition>& sketches() const noexcept { return sketches_; }
     [[nodiscard]] const SketchDefinition& sketch(const DocumentId& id) const;
+    [[nodiscard]] SketchProblem evaluated_sketch(const DocumentId& id) const;
     [[nodiscard]] const std::vector<FeatureDefinition>& features() const noexcept { return features_; }
     [[nodiscard]] const FeatureDefinition& feature(const DocumentId& id) const;
     [[nodiscard]] const std::optional<DocumentId>& rollback_before() const noexcept { return rollback_before_; }
@@ -69,6 +70,7 @@ public:
     void set_parameter_expression(std::string_view name, std::string expression);
     DocumentId add_sketch(std::string name, SketchProblem problem);
     void replace_sketch(const DocumentId& id, SketchProblem problem);
+    void set_sketch_dimension(const DocumentId& sketch_id, const DocumentId& constraint_id, DepthInput value);
     void rename_sketch(const DocumentId& id, std::string name);
     DocumentId add_extrusion(std::string name, const DocumentId& sketch, DepthInput depth);
     DocumentId add_subtractive_extrusion(std::string name, const DocumentId& input,

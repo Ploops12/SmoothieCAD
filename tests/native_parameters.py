@@ -127,7 +127,7 @@ class ParameterChecks(unittest.TestCase):
         document.add_parameter_expression("middle", "base * 2", "mm")
         document.add_parameter_expression("depth", "middle + 1 mm", "mm")
         snapshot = document.to_snapshot()
-        self.assertEqual(snapshot["schema_version"], 5)
+        self.assertEqual(snapshot["schema_version"], 6)
         self.assertEqual(snapshot["parameters"][0], {"name": "base", "value": 5, "unit": "mm"})
         self.assertEqual(snapshot["parameters"][1], {"name": "middle", "expression": "base * 2", "unit": "mm"})
         snapshot["parameters"].reverse()
@@ -153,7 +153,7 @@ class ParameterChecks(unittest.TestCase):
         case(add_cycle)
         case(lambda s: s["parameters"][-1].update(value=True))
         case(lambda s: s.update(schema_version=4))
-        case(lambda s: s.update(schema_version=6))
+        case(lambda s: s.update(schema_version=7))
         for candidate in malformed:
             with self.subTest(candidate=candidate):
                 with self.assertRaises(ValueError):

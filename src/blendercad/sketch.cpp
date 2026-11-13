@@ -19,7 +19,32 @@ void validate_point(Point2 point) {
 
 } // namespace
 
-void validate_sketch(const SketchProblem& problem) {
+bool is_sketch_dimension(SketchConstraintKind kind) noexcept {
+    using Kind = SketchConstraintKind;
+    return kind == Kind::Distance || kind == Kind::Length || kind == Kind::Radius
+        || kind == Kind::Diameter || kind == Kind::DistanceX || kind == Kind::DistanceY;
+}
+
+void validate_sketch_constraint_value(SketchConstraintKind kind, double value) {
+    require_finite(value);
+    using Kind = SketchConstraintKind;
+    switch (kind) {
+    case Kind::Length: case Kind::Radius: case Kind::Diameter:
+        if (value <= 0) throw std::invalid_argument("length, radius and diameter must be positive");
+        return;
+    case Kind::Distance:
+        if (value < 0) throw std::invalid_argument("point distance cannot be negative");
+        return;
+    case Kind::DistanceX: case Kind::DistanceY: return;
+    case Kind::Coincident: case Kind::Horizontal: case Kind::Vertical:
+    case Kind::Parallel: case Kind::Perpendicular:
+        if (value != 0) throw std::invalid_argument("geometric constraints do not accept a numeric dimension");
+        return;
+    }
+    throw std::invalid_argument("unsupported sketch constraint kind");
+}
+
+void validate_sketch(const SketchProblem& problem, bool allow_parameters) {
     const auto& plane = problem.plane;
     for (const auto vector : {plane.origin, plane.x_axis, plane.y_axis}) {
         require_finite(vector.x); require_finite(vector.y); require_finite(vector.z);
@@ -78,8 +103,21 @@ void validate_sketch(const SketchProblem& problem) {
     for (const auto& constraint : problem.constraints) {
         const auto id = constraint.id.to_string();
         if (!identities.insert(id).second) throw std::invalid_argument("duplicate sketch identity: " + id);
-        require_finite(constraint.value);
         const auto kind = constraint.kind;
+        const std::string context = "sketch constraint " + id + ": ";
+        if (constraint.parameter) {
+            if (!allow_parameters) {
+                throw std::invalid_argument(context + "unresolved parameter '" + *constraint.parameter
+                    + "'; obtain an evaluated sketch from its document before solving");
+            }
+            if (!is_sketch_dimension(kind)) {
+                throw std::invalid_argument(context + "only dimensional constraints may bind a parameter");
+            }
+            if (constraint.parameter->empty()) throw std::invalid_argument(context + "dimension parameter name cannot be empty");
+            if (!std::isfinite(constraint.value) || constraint.value != 0) {
+                throw std::invalid_argument(context + "parameter-bound definitions must have canonical numeric value zero");
+            }
+        }
         const bool single = kind == Kind::Horizontal || kind == Kind::Vertical || kind == Kind::Length ||
                             kind == Kind::Radius || kind == Kind::Diameter;
         if (constraint.targets.size() != (single ? 1U : 2U)) throw std::invalid_argument("incorrect constraint target count");
@@ -99,13 +137,9 @@ void validate_sketch(const SketchProblem& problem) {
             break;
         default: throw std::invalid_argument("unsupported sketch constraint kind");
         }
-        if ((kind == Kind::Length || kind == Kind::Radius || kind == Kind::Diameter) && constraint.value <= 0) {
-            throw std::invalid_argument("length, radius and diameter must be positive");
-        }
-        if (kind == Kind::Distance && constraint.value < 0) throw std::invalid_argument("point distance cannot be negative");
-        if ((kind == Kind::Coincident || kind == Kind::Horizontal || kind == Kind::Vertical ||
-             kind == Kind::Parallel || kind == Kind::Perpendicular) && constraint.value != 0) {
-            throw std::invalid_argument("geometric constraints do not accept a numeric dimension");
+        if (!constraint.parameter) {
+            try { validate_sketch_constraint_value(kind, constraint.value); }
+            catch (const std::invalid_argument& error) { throw std::invalid_argument(context + error.what()); }
         }
     }
 }

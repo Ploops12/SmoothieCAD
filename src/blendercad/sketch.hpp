@@ -48,6 +48,9 @@ struct SketchConstraint final {
     SketchConstraintKind kind{SketchConstraintKind::Coincident};
     std::vector<SketchReference> targets;
     double value{};
+    // A bound definition stores zero here; only a resolved copy contains the
+    // parameter's current numerical dimension before it reaches the solver.
+    std::optional<std::string> parameter{};
     friend bool operator==(const SketchConstraint&, const SketchConstraint&) = default;
 };
 
@@ -67,6 +70,10 @@ struct SketchDefinition final {
 
 // Structural validity is independent of solver feasibility. Conflicting but
 // well-formed constraints remain valid persistent definitions for later repair.
-void validate_sketch(const SketchProblem& problem);
+// Solver-facing validation rejects unresolved parameter bindings. Definition
+// validation permits canonical bindings without imposing evaluated domains.
+void validate_sketch(const SketchProblem& problem, bool allow_parameters = false);
+[[nodiscard]] bool is_sketch_dimension(SketchConstraintKind kind) noexcept;
+void validate_sketch_constraint_value(SketchConstraintKind kind, double value);
 
 } // namespace blendercad

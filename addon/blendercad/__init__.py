@@ -117,6 +117,41 @@ def _classes():
                 box.label(text=f"Solid: {host.get('blendercad_state', 'Needs recompute')}")
                 if host.get("blendercad_diagnostic"):
                     box.label(text=host["blendercad_diagnostic"], icon="ERROR")
+                if host.get(presentation.DOC) == document.id:
+                    dimensions = {_native.SketchConstraintKind.DISTANCE, _native.SketchConstraintKind.LENGTH,
+                                  _native.SketchConstraintKind.RADIUS, _native.SketchConstraintKind.DIAMETER,
+                                  _native.SketchConstraintKind.DISTANCE_X, _native.SketchConstraintKind.DISTANCE_Y}
+                    seen = set()
+                    reports = {item.feature_id: item for item in state.report.features} if state.report and state.serialized == serialized else {}
+                    for feature in document.features:
+                        if feature.body_id != host.get(presentation.BODY) or feature.sketch_id in seen:
+                            continue
+                        seen.add(feature.sketch_id)
+                        sketch = next(item for item in document.sketches if item.id == feature.sketch_id)
+                        profile = box.box()
+                        profile.label(text=f"Sketch: {sketch.name}")
+                        entity_names = {entity.id: f"{'Line' if isinstance(entity.geometry, _native.Line2) else 'Circle'} {index + 1}"
+                                        for index, entity in enumerate(sketch.problem.entities)}
+                        report = reports.get(feature.id)
+                        if report is not None and report.sketch_report is not None:
+                            solved = report.sketch_report
+                            profile.label(text=f"{solved.state.name.replace('_', ' ').title()} · {solved.remaining_degrees_of_freedom} DOF")
+                        for constraint in sketch.problem.constraints:
+                            if constraint.kind not in dimensions:
+                                continue
+                            label = constraint.kind.name.replace("_", " ").title()
+                            target = constraint.targets[0]
+                            if target.entity:
+                                label += f" ({entity_names[target.entity]})"
+                            if constraint.parameter is not None:
+                                value = document.length_value(constraint.parameter)
+                                text = f"{label}: {constraint.parameter} = {value:g} mm"
+                            else:
+                                text = f"{label}: {constraint.value:g} mm"
+                            row = profile.row(align=True)
+                            row.label(text=text)
+                            edit = row.operator("blendercad.set_sketch_dimension", text="Edit")
+                            edit.sketch_id, edit.constraint_id = sketch.id, constraint.id
                 display = presentation.display_for(context.scene, host)
                 if display is not None:
                     box.template_ID(display, "active_material", new="material.new")

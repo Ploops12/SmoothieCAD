@@ -241,15 +241,17 @@ EvaluationReport FeatureEvaluator::evaluate(const Document& document) {
                     const auto input = feature_input(feature);
                     const auto input_shape = input ? current.at(input->to_string()) : nullptr;
                     const auto depth = document.length_value(feature_depth(feature));
-                    const auto& sketch = document.sketch(feature_sketch(feature));
-                    InputKey key{feature.parameters, feature.body, feature.version, sketch.problem, depth, state.tolerance, input_shape};
+                    // Resolve/validate dimensions before testing the cache:
+                    // canonical stored zeros are not evaluated solver inputs.
+                    // Invalid parameter ranges must fail, not reuse old solids.
+                    auto profile = document.evaluated_sketch(feature_sketch(feature));
+                    InputKey key{feature.parameters, feature.body, feature.version, profile, depth, state.tolerance, input_shape};
                     if (cached.key && *cached.key == key && cached.shape) {
                         current.emplace(id, cached.shape);
                         evaluation.reused = true;
                         evaluation.sketch_report = cached.sketch_report;
                         ++report.reused_count;
                     } else {
-                        auto profile = sketch.problem;
                         evaluation.sketch_report = solver->solve(profile);
                         const auto solve_state = evaluation.sketch_report->state;
                         if (solve_state == SketchSolveState::Conflicting || solve_state == SketchSolveState::Failed) {

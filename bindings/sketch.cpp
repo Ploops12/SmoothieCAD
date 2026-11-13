@@ -63,16 +63,18 @@ void bind_sketch(py::module_& module) {
         .value("DISTANCE_Y", SketchConstraintKind::DistanceY);
     py::class_<SketchConstraint>(module, "SketchConstraint")
         .def(py::init([](SketchConstraintKind kind, std::vector<SketchReference> targets,
-                        double value, const std::string& id) {
-            return SketchConstraint{identity(id), kind, std::move(targets), value};
-        }), py::arg("kind"), py::arg("targets"), py::arg("value") = 0, py::arg("id") = "")
+                        double value, const std::string& id, std::optional<std::string> parameter) {
+            return SketchConstraint{identity(id), kind, std::move(targets), value, std::move(parameter)};
+        }), py::arg("kind"), py::arg("targets"), py::arg("value") = 0, py::arg("id") = "",
+            py::arg("parameter") = py::none())
         .def_property_readonly("id", [](const SketchConstraint& constraint) { return constraint.id.to_string(); })
         .def_readwrite("kind", &SketchConstraint::kind)
         .def_property("targets", [](const SketchConstraint& constraint) { return constraint.targets; },
             [](SketchConstraint& constraint, std::vector<SketchReference> targets) {
                 constraint.targets = std::move(targets);
             })
-        .def_readwrite("value", &SketchConstraint::value);
+        .def_readwrite("value", &SketchConstraint::value)
+        .def_readwrite("parameter", &SketchConstraint::parameter);
     py::class_<SketchProblem>(module, "SketchProblem")
         .def(py::init<>())
         .def_readwrite("plane", &SketchProblem::plane)

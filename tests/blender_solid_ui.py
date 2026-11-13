@@ -46,6 +46,8 @@ cursor = (500, 450)
 overlay_before = 0
 visibility_body = None
 visibility_token = None
+dimension_sketch = None
+dimension_id = None
 
 
 def click_point(point):
@@ -73,7 +75,7 @@ def event(kind, **values):
 
 
 def tick():
-    global step, baseline, host_id, area, region, overlay_before, visibility_body, visibility_token
+    global step, baseline, host_id, area, region, overlay_before, visibility_body, visibility_token, dimension_sketch, dimension_id
     try:
         scene = bpy.context.scene
         if step == 0:
@@ -239,9 +241,37 @@ def tick():
             event("ESC")
         elif step == 26:
             assert scene.blendercad_document_snapshot == baseline, "Cancelling the expression dialog modified intent"
+            document = p.read_document(scene)
+            feature = next(item for item in document.features if item.body_id == bpy.context.active_object[p.BODY])
+            dimension_sketch = feature.sketch_id
+            dimension_id = next(item.id for item in document.get_sketch(dimension_sketch).constraints
+                                if item.kind == addon._native.SketchConstraintKind.LENGTH)
+            with bpy.context.temp_override(area=area, region=region):
+                assert bpy.ops.blendercad.set_sketch_dimension(sketch_id=dimension_sketch,
+                    constraint_id=dimension_id, parameter="offset") == {"FINISHED"}
+                baseline = scene.blendercad_document_snapshot
+                assert bpy.ops.blendercad.set_sketch_dimension("INVOKE_DEFAULT",
+                    sketch_id=dimension_sketch, constraint_id=dimension_id) == {"RUNNING_MODAL"}
+        elif step == 27:
+            event("RET")
+        elif step == 28:
+            document = p.read_document(scene)
+            constraint = next(item for item in document.get_sketch(dimension_sketch).constraints if item.id == dimension_id)
+            assert constraint.parameter == "offset" and constraint.value == 0
+            resolved = next(item for item in document.evaluated_sketch(dimension_sketch).constraints if item.id == dimension_id)
+            assert resolved.parameter is None and resolved.value == 5
+            assert scene.blendercad_document_snapshot == baseline
+            with bpy.context.temp_override(area=area, region=region):
+                assert bpy.ops.blendercad.set_sketch_dimension("INVOKE_DEFAULT",
+                    sketch_id=dimension_sketch, constraint_id=dimension_id) == {"RUNNING_MODAL"}
+        elif step == 29:
+            event("ESC")
+        elif step == 30:
+            assert scene.blendercad_document_snapshot == baseline, "Cancelling the dimension dialog modified intent"
             (options.output_dir / "result.json").write_text(json.dumps({"passed": True, "capability_calls": capability_calls,
                 "cad_selection_kinds": ["FACE", "EDGE", "VERTEX"], "overlay_draw_count": highlight.draw_count,
-                "visibility_events": ["H", "ALT_H", "LOCAL_VIEW"], "expression_dialog": True}))
+                "visibility_events": ["H", "ALT_H", "LOCAL_VIEW"], "expression_dialog": True,
+                "sketch_dimension_dialog": True}))
             bpy.ops.wm.quit_blender()
             return None
         step += 1
