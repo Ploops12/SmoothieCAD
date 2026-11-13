@@ -6,6 +6,7 @@
 #include "blendercad/reference.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,6 +26,9 @@ struct Parameter final {
     std::string name;
     double value{};
     ParameterUnit unit{ParameterUnit::Unitless};
+    // Expression values are disposable evaluations; the expression itself is
+    // the definition. A literal has no expression and retains its saved value.
+    std::optional<std::string> expression{};
     friend bool operator==(const Parameter&, const Parameter&) = default;
 };
 
@@ -32,7 +36,7 @@ struct Parameter final {
 // held by GeometryAdapter and are not part of this snapshot.
 class Document final {
 public:
-    static constexpr std::uint32_t current_schema_version = 4;
+    static constexpr std::uint32_t current_schema_version = 5;
     static constexpr double default_geometric_tolerance_mm = 0.001;
 
     Document();
@@ -60,7 +64,9 @@ public:
 
     void set_geometric_tolerance_mm(double tolerance);
     void add_parameter(std::string name, double value, ParameterUnit unit);
+    void add_parameter_expression(std::string name, std::string expression, ParameterUnit unit);
     void set_parameter_value(std::string_view name, double value);
+    void set_parameter_expression(std::string_view name, std::string expression);
     DocumentId add_sketch(std::string name, SketchProblem problem);
     void replace_sketch(const DocumentId& id, SketchProblem problem);
     void rename_sketch(const DocumentId& id, std::string name);
@@ -88,6 +94,7 @@ private:
     std::optional<DocumentId> rollback_before_;
     std::vector<ReferenceDefinition> references_;
     void ensure_revision_available() const;
+    void publish_parameters(std::vector<Parameter> parameters);
     void publish_sketches(std::vector<SketchDefinition> sketches);
     void publish_design(std::vector<SketchDefinition> sketches, std::vector<FeatureDefinition> features,
                         std::optional<DocumentId> rollback_before);

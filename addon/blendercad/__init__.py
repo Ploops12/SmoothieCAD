@@ -88,7 +88,12 @@ def _classes():
             if state.serialized != serialized or state.scale != presentation.unit_scale(context.scene):
                 self.layout.label(text="Display needs recompute", icon="ERROR")
             for parameter in document.parameters:
-                self.layout.label(text=f"{parameter.name}: {parameter.value:g} {parameter.unit}")
+                row = self.layout.row(align=True)
+                row.label(text=f"{parameter.name}: {parameter.value:g} {parameter.unit}")
+                edit = row.operator("blendercad.parameter", text="Edit")
+                edit.name = parameter.name
+                if parameter.expression is not None:
+                    self.layout.label(text=f"= {parameter.expression}")
             for feature in document.features:
                 row = self.layout.row(align=True)
                 row.label(text=feature.name)

@@ -100,7 +100,7 @@ with tempfile.TemporaryDirectory() as directory:
         bpy.ops.wm.save_as_mainfile(filepath=legacy_filepath)
         bpy.ops.wm.open_mainfile(filepath=legacy_filepath)
         migrated = n.Document.from_snapshot(json.loads(bpy.context.scene.blendercad_document_snapshot))
-        assert migrated.schema_version == 4 and migrated.sketches == [] and migrated.features == [] and migrated.references == []
+        assert migrated.schema_version == 5 and migrated.sketches == [] and migrated.features == [] and migrated.references == []
         assert migrated.revision == 7 and migrated.id == legacy["document_id"]
         assert bpy.context.scene.blendercad_document_snapshot == legacy_serialized, "Load silently rewrote a legacy snapshot"
         legacy_two = document.to_snapshot()
@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory() as directory:
         bpy.ops.wm.save_as_mainfile(filepath=legacy_two_filepath)
         bpy.ops.wm.open_mainfile(filepath=legacy_two_filepath)
         migrated_two = n.Document.from_snapshot(json.loads(bpy.context.scene.blendercad_document_snapshot))
-        assert migrated_two.schema_version == 4 and migrated_two.features == [] and migrated_two.references == []
+        assert migrated_two.schema_version == 5 and migrated_two.features == [] and migrated_two.references == []
         assert migrated_two.sketches[0].id == sketch_id
         assert bpy.context.scene.blendercad_document_snapshot == legacy_two_serialized
         legacy_three = document.to_snapshot()
@@ -126,7 +126,7 @@ with tempfile.TemporaryDirectory() as directory:
         bpy.ops.wm.save_as_mainfile(filepath=legacy_three_filepath)
         bpy.ops.wm.open_mainfile(filepath=legacy_three_filepath)
         migrated_three = n.Document.from_snapshot(json.loads(bpy.context.scene.blendercad_document_snapshot))
-        assert migrated_three.schema_version == 4 and migrated_three.references == []
+        assert migrated_three.schema_version == 5 and migrated_three.references == []
         assert migrated_three.features[0].id == extrusion and migrated_three.rollback_before == document.rollback_before
         assert bpy.context.scene.blendercad_document_snapshot == legacy_three_serialized
         future = document.to_snapshot()

@@ -398,10 +398,10 @@ Document parse_snapshot(const py::object& raw) {
             require_fields(snapshot, {"schema_version", "document_id", "revision",
                                       "geometric_tolerance_mm", "parameters", "sketches",
                                       "features", "rollback_before"}, "schema 3 snapshot");
-        } else if (schema == Document::current_schema_version) {
+        } else if (schema == 4 || schema == Document::current_schema_version) {
             require_fields(snapshot, {"schema_version", "document_id", "revision",
                                       "geometric_tolerance_mm", "parameters", "sketches",
-                                      "features", "rollback_before", "references"}, "schema 4 snapshot");
+                                      "features", "rollback_before", "references"}, "document snapshot");
         } else {
             invalid("unsupported BlenderCAD document schema version");
         }
@@ -410,10 +410,17 @@ Document parse_snapshot(const py::object& raw) {
         for (const auto& raw_parameter : as_list(required(snapshot, "parameters", "document snapshot"),
                                                   "parameters")) {
             const auto parameter = as_dict(raw_parameter, "parameter");
-            require_fields(parameter, {"name", "value", "unit"}, "parameter");
-            parameters.push_back({as_string(parameter["name"], "parameter name"),
-                                  as_number(parameter["value"], "parameter value"),
-                                  parse_unit(as_string(parameter["unit"], "parameter unit"))});
+            if (schema >= 5 && parameter.contains("expression")) {
+                require_fields(parameter, {"name", "expression", "unit"}, "expression parameter");
+                parameters.push_back({as_string(parameter["name"], "parameter name"), 0.0,
+                                      parse_unit(as_string(parameter["unit"], "parameter unit")),
+                                      as_string(parameter["expression"], "parameter expression")});
+            } else {
+                require_fields(parameter, {"name", "value", "unit"}, "literal parameter");
+                parameters.push_back({as_string(parameter["name"], "parameter name"),
+                                      as_number(parameter["value"], "parameter value"),
+                                      parse_unit(as_string(parameter["unit"], "parameter unit"))});
+            }
         }
 
         std::vector<SketchDefinition> sketches;
@@ -478,6 +485,7 @@ void bind_document(py::module_& module) {
     py::class_<Parameter>(module, "Parameter")
         .def_readonly("name", &Parameter::name)
         .def_readonly("value", &Parameter::value)
+        .def_readonly("expression", &Parameter::expression)
         .def_property_readonly("unit", [](const Parameter& parameter) {
             return std::string(unit_name(parameter.unit));
         });
@@ -567,6 +575,12 @@ void bind_document(py::module_& module) {
             document.add_parameter(std::move(name), value, parse_unit(unit));
         }, py::arg("name"), py::arg("value"), py::arg("unit") = "unitless")
         .def("set_parameter_value", &Document::set_parameter_value)
+        .def("add_parameter_expression", [](Document& document, std::string name, std::string expression,
+                                             const std::string& unit) {
+            document.add_parameter_expression(std::move(name), std::move(expression), parse_unit(unit));
+        }, py::arg("name"), py::arg("expression"), py::arg("unit") = "unitless")
+        .def("set_parameter_expression", &Document::set_parameter_expression,
+             py::arg("name"), py::arg("expression"))
         .def("add_sketch", [](Document& document, std::string name, const SketchProblem& problem) {
             return document.add_sketch(std::move(name), problem).to_string();
         })
@@ -630,7 +644,8 @@ void bind_document(py::module_& module) {
             for (const auto& parameter : document.parameters()) {
                 py::dict item;
                 item["name"] = parameter.name;
-                item["value"] = parameter.value;
+                if (parameter.expression) item["expression"] = *parameter.expression;
+                else item["value"] = parameter.value;
                 item["unit"] = std::string(unit_name(parameter.unit));
                 parameters.append(std::move(item));
             }

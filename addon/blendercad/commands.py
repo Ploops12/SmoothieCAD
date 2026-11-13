@@ -87,10 +87,15 @@ def set_depth(context, feature_id, depth):
     return commit(context.scene, document)
 
 
-def set_parameter(context, name, value, unit=None):
+def set_parameter(context, name, value, unit=None, expression=None):
     capabilities.require_capability(context.selected_objects, "edit_definition")
     document = p.read_document(context.scene)
-    if unit is None:
+    if expression is not None:
+        if unit is None:
+            document.set_parameter_expression(name, expression)
+        else:
+            document.add_parameter_expression(name, expression, unit)
+    elif unit is None:
         document.set_parameter_value(name, value)
     else:
         document.add_parameter(name, value, unit)

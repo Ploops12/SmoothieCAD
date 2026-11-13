@@ -1,7 +1,7 @@
 """Blender UI adapters. Modelling behavior belongs to the command service."""
 
 import bpy
-from bpy.props import BoolProperty, FloatProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
 from mathutils import Vector
 
 from . import commands, presentation as p
@@ -95,13 +95,39 @@ class BLENDERCAD_OT_parameter(CadOperator, bpy.types.Operator):
     bl_label = "Set CAD Parameter"
     name: StringProperty(name="Name", default="thickness")
     value: FloatProperty(name="Value", default=5)
-    create: BoolProperty(name="Create new length parameter", default=False)
+    create: BoolProperty(name="Create new parameter", default=False)
+    unit: EnumProperty(name="Unit", items=(("mm", "mm", "Length in millimetres"),
+                                           ("deg", "deg", "Angle in degrees"),
+                                           ("unitless", "Unitless", "Scalar factor")), default="mm")
+    use_expression: BoolProperty(name="Use expression", default=False)
+    expression: StringProperty(name="Expression", description="Arithmetic with named parameters and explicit units, e.g. thickness * 2 + 1 mm")
 
     def invoke(self, context, event):
+        try:
+            if not self.create:
+                parameter = next((item for item in p.read_document(context.scene).parameters if item.name == self.name), None)
+                if parameter is not None:
+                    self.value, self.unit = parameter.value, parameter.unit
+                    self.use_expression = parameter.expression is not None
+                    self.expression = parameter.expression or ""
+        except (ValueError, KeyError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
         return context.window_manager.invoke_props_dialog(self)
 
+    def draw(self, context):
+        self.layout.prop(self, "name")
+        self.layout.prop(self, "create")
+        if self.create:
+            self.layout.prop(self, "unit")
+        else:
+            self.layout.label(text=f"Unit: {self.unit}")
+        self.layout.prop(self, "use_expression")
+        self.layout.prop(self, "expression" if self.use_expression else "value")
+
     def run(self, context):
-        commands.set_parameter(context, self.name, self.value, "mm" if self.create else None)
+        commands.set_parameter(context, self.name, self.value, self.unit if self.create else None,
+                               self.expression if self.use_expression else None)
 
 
 class SolidOperator(CadOperator):

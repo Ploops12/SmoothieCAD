@@ -1,4 +1,5 @@
 #include "blendercad/document.hpp"
+#include "blendercad/parameter_expression.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -129,13 +130,16 @@ Document Document::restore(DocumentId id, std::uint64_t revision,
     if (tolerance_mm <= 0.0) throw std::invalid_argument("geometric tolerance must be positive");
     for (std::size_t index = 0; index < parameters.size(); ++index) {
         validate_name(parameters[index].name);
-        validate_value(parameters[index].value);
+        // The saved expression, not any incoming evaluation cache, owns the
+        // definition. Literal values still require a finite saved value.
+        if (!parameters[index].expression) validate_value(parameters[index].value);
         validate_unit(parameters[index].unit);
         if (std::ranges::any_of(parameters.begin(), parameters.begin() + static_cast<std::ptrdiff_t>(index),
                 [&](const Parameter& parameter) { return parameter.name == parameters[index].name; })) {
             throw std::invalid_argument("duplicate parameter name in document snapshot");
         }
     }
+    resolve_parameter_expressions(parameters);
     validate_design(id, parameters, sketches, features, rollback_before, references);
     Document document(std::move(id));
     document.revision_ = revision;
@@ -166,9 +170,20 @@ void Document::add_parameter(std::string name, double value, ParameterUnit unit)
         })) {
         throw std::invalid_argument("parameter name already exists: " + name);
     }
-    ensure_revision_available();
-    parameters_.push_back(Parameter{std::move(name), value, unit});
-    ++revision_;
+    auto candidate = parameters_;
+    candidate.push_back(Parameter{std::move(name), value, unit});
+    publish_parameters(std::move(candidate));
+}
+
+void Document::add_parameter_expression(std::string name, std::string expression, ParameterUnit unit) {
+    validate_name(name);
+    validate_unit(unit);
+    if (std::ranges::any_of(parameters_, [&](const Parameter& parameter) { return parameter.name == name; })) {
+        throw std::invalid_argument("parameter name already exists: " + name);
+    }
+    auto candidate = parameters_;
+    candidate.push_back(Parameter{std::move(name), 0, unit, std::move(expression)});
+    publish_parameters(std::move(candidate));
 }
 
 void Document::set_parameter_value(std::string_view name, double value) {
@@ -177,9 +192,31 @@ void Document::set_parameter_value(std::string_view name, double value) {
         return parameter.name == name;
     });
     if (found == parameters_.end()) throw std::invalid_argument("unknown parameter: " + std::string(name));
-    if (found->value == value) return;
+    if (found->value == value && !found->expression) return;
+    auto candidate = parameters_;
+    auto& parameter = candidate[static_cast<std::size_t>(found - parameters_.begin())];
+    parameter.value = value;
+    parameter.expression.reset();
+    publish_parameters(std::move(candidate));
+}
+
+void Document::set_parameter_expression(std::string_view name, std::string expression) {
+    const auto found = std::ranges::find_if(parameters_, [&](const Parameter& parameter) {
+        return parameter.name == name;
+    });
+    if (found == parameters_.end()) throw std::invalid_argument("unknown parameter: " + std::string(name));
+    auto candidate = parameters_;
+    candidate[static_cast<std::size_t>(found - parameters_.begin())].expression = std::move(expression);
+    publish_parameters(std::move(candidate));
+}
+
+void Document::publish_parameters(std::vector<Parameter> parameters) {
+    // A changed upstream literal can invalidate a formerly valid downstream
+    // expression. Resolve on detached definitions before revision/publication.
+    resolve_parameter_expressions(parameters);
+    if (parameters == parameters_) return;
     ensure_revision_available();
-    found->value = value;
+    parameters_ = std::move(parameters);
     ++revision_;
 }
 

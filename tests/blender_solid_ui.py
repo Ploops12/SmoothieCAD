@@ -223,9 +223,25 @@ def tick():
         elif step == 22:
             assert area.spaces.active.local_view is None
             assert scene.blendercad_document_snapshot == baseline
+            with bpy.context.temp_override(area=area, region=region):
+                assert bpy.ops.blendercad.parameter(name="thickness", value=2, create=True) == {"FINISHED"}
+                assert bpy.ops.blendercad.parameter("INVOKE_DEFAULT", name="offset", create=True,
+                    use_expression=True, expression="2 * thickness + 1 mm") == {"RUNNING_MODAL"}
+        elif step == 23:
+            event("RET")
+        elif step == 24:
+            parameter = next(item for item in p.read_document(scene).parameters if item.name == "offset")
+            assert parameter.value == 5 and parameter.expression == "2 * thickness + 1 mm"
+            baseline = scene.blendercad_document_snapshot
+            with bpy.context.temp_override(area=area, region=region):
+                assert bpy.ops.blendercad.parameter("INVOKE_DEFAULT", name="offset") == {"RUNNING_MODAL"}
+        elif step == 25:
+            event("ESC")
+        elif step == 26:
+            assert scene.blendercad_document_snapshot == baseline, "Cancelling the expression dialog modified intent"
             (options.output_dir / "result.json").write_text(json.dumps({"passed": True, "capability_calls": capability_calls,
                 "cad_selection_kinds": ["FACE", "EDGE", "VERTEX"], "overlay_draw_count": highlight.draw_count,
-                "visibility_events": ["H", "ALT_H", "LOCAL_VIEW"]}))
+                "visibility_events": ["H", "ALT_H", "LOCAL_VIEW"], "expression_dialog": True}))
             bpy.ops.wm.quit_blender()
             return None
         step += 1

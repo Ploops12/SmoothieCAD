@@ -113,7 +113,7 @@ class DocumentSnapshotChecks(unittest.TestCase):
         self.assertEqual(restored.id, document.id)
         self.assertEqual([item.id for item in restored.sketches], [item["id"] for item in original["sketches"]])
 
-    def test_schema_one_migrates_in_memory_and_emits_schema_four(self):
+    def test_schema_one_migrates_in_memory_and_emits_schema_five(self):
         document = n.Document()
         document.add_parameter("height", 4.0, "mm")
         old_snapshot = document.to_snapshot()
@@ -123,21 +123,21 @@ class DocumentSnapshotChecks(unittest.TestCase):
         del old_snapshot["rollback_before"]
         del old_snapshot["references"]
         restored = n.Document.from_snapshot(old_snapshot)
-        self.assertEqual(restored.schema_version, 4)
-        self.assertEqual(restored.to_snapshot()["schema_version"], 4)
+        self.assertEqual(restored.schema_version, 5)
+        self.assertEqual(restored.to_snapshot()["schema_version"], 5)
         self.assertEqual(restored.sketches, [])
         self.assertEqual(restored.references, [])
         self.assertEqual(restored.revision, old_snapshot["revision"])
 
-    def test_schema_two_migrates_in_memory_and_emits_schema_four(self):
+    def test_schema_two_migrates_in_memory_and_emits_schema_five(self):
         snapshot = complete_document().to_snapshot()
         snapshot["schema_version"] = 2
         del snapshot["features"]
         del snapshot["rollback_before"]
         del snapshot["references"]
         restored = n.Document.from_snapshot(snapshot)
-        self.assertEqual(restored.schema_version, 4)
-        self.assertEqual(restored.to_snapshot()["schema_version"], 4)
+        self.assertEqual(restored.schema_version, 5)
+        self.assertEqual(restored.to_snapshot()["schema_version"], 5)
         self.assertEqual(restored.to_snapshot()["sketches"], snapshot["sketches"])
         self.assertEqual(restored.to_snapshot()["features"], [])
         self.assertIsNone(restored.rollback_before)
@@ -151,13 +151,24 @@ class DocumentSnapshotChecks(unittest.TestCase):
         snapshot["schema_version"] = 3
         del snapshot["references"]
         restored = n.Document.from_snapshot(snapshot)
-        self.assertEqual(restored.schema_version, 4)
+        self.assertEqual(restored.schema_version, 5)
         self.assertEqual(restored.references, [])
         self.assertEqual(restored.revision, snapshot["revision"])
         upgraded = restored.to_snapshot()
         del upgraded["references"]
         upgraded["schema_version"] = 3
         self.assertEqual(upgraded, snapshot)
+
+    def test_schema_four_preserves_literal_parameters_and_named_references(self):
+        document, _, _, extrusion, _ = feature_document()
+        document.add_reference("Legacy reference", reference_target(document, extrusion))
+        current = document.to_snapshot()
+        legacy = copy.deepcopy(current)
+        legacy["schema_version"] = 4
+        restored = n.Document.from_snapshot(legacy)
+        self.assertEqual(restored.to_snapshot(), current)
+        self.assertTrue(all(item.expression is None for item in restored.parameters))
+        self.assertEqual(legacy["schema_version"], 4)
 
     def test_named_reference_round_trip_repair_and_copy_out(self):
         document, _, _, extrusion, pocket = feature_document()
@@ -166,7 +177,7 @@ class DocumentSnapshotChecks(unittest.TestCase):
                                        ("Outer edge", "edge:start:source", n.TopologyKind.EDGE),
                                        ("Corner", "vertex:start:source", n.TopologyKind.VERTEX))]
         snapshot = document.to_snapshot()
-        self.assertEqual(snapshot["schema_version"], 4)
+        self.assertEqual(snapshot["schema_version"], 5)
         self.assertEqual(set(snapshot["references"][0]), {"id", "name", "version", "body", "kind", "feature", "key"})
         self.assertEqual([item["kind"] for item in snapshot["references"]], ["face", "edge", "vertex"])
         self.assertEqual(n.Document.from_snapshot(json.loads(json.dumps(snapshot))).to_snapshot(), snapshot)
@@ -445,7 +456,7 @@ class DocumentSnapshotChecks(unittest.TestCase):
     def test_future_document_and_sketch_versions_are_rejected(self):
         snapshot = complete_document().to_snapshot()
         future_document = copy.deepcopy(snapshot)
-        future_document["schema_version"] = 5
+        future_document["schema_version"] += 1
         with self.assertRaises(ValueError):
             n.Document.from_snapshot(future_document)
         future_sketch = copy.deepcopy(snapshot)

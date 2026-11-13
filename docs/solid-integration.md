@@ -19,11 +19,12 @@ Decimal for a Solid-only selection) frames its geometry rather than the Empty's
 origin. Framing lowers the viewport near-clip distance when needed for small
 parts. It does not change modelling tolerance or geometry.
 
-The sidebar exposes feature-depth edits, creation/editing of named length
+The sidebar exposes feature-depth edits, creation/editing of named unit-aware
 parameters, recomputation, whole-body material selection, duplication, deletion
 and **Convert to Regular Mesh**. A depth may be a literal millimetre value or a
-named length parameter. This does not yet supply arithmetic expressions,
-interactive sketch tools, face-based modelling or fillets.
+named length parameter, which can itself have a unit-aware arithmetic
+[expression definition](parameter-expressions.md). Interactive sketch tools,
+face-based modelling and fillets remain pending.
 
 ## Ownership, units and publication
 
@@ -216,3 +217,5 @@ values, saved references and successful GPU overlay draws in the supported
 OpenGL viewport. Native H/Alt-H and Numpad-Slash events verify complete-Solid
 Hide/Show and local-view display/picking without changing the document or mesh
 publication token.
+It also confirms an expression parameter through the actual dialog and cancels
+its edit dialog without changing the saved definition.

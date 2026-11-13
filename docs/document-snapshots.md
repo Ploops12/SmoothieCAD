@@ -33,7 +33,7 @@ Structural validity is different from solver feasibility. Well-formed redundant/
 
 Sketch edits validate a candidate collection before replacing document storage. Rejected edits leave both definitions and revision unchanged. Actual accepted changes advance the document's uint64 content revision once; no-op replacements/renames and unchanged numeric edits do not. Revision exhaustion rejects changes before mutation instead of wrapping and permitting stale cache keys. Native document mutation is not a thread-safe or Blender-undo API; a command/evaluation layer must own transactions and revision-aware publication.
 
-## Schema 4 and migration
+## Schema 5 and migration
 
 The binding maps typed core records to JSON-compatible values; Blender's storage adapter uses Python's standard JSON encoder. This avoids a second JSON dependency in geometry/core code and keeps scene storage replaceable. All supported fields are required, unknown fields are rejected, and numeric snapshot fields reject booleans, nonfinite values and type coercions. Malformed snapshots raise `ValueError`.
 
@@ -41,10 +41,12 @@ Root fields are `schema_version`, `document_id`, `revision`, `geometric_toleranc
 
 Constraints encode `id`, `type`, `targets` and `value`. Type names are stable strings: `coincident`, `horizontal`, `vertical`, `parallel`, `perpendicular`, `distance`, `length`, `radius`, `diameter`, `distance_x`, `distance_y`. Targets encode `entity` (UUID or null for origin) and `element` (`geometry`, `line_start`, `line_end`, `circle_center`, `origin`). Invalid/dangling and cross-sketch references are rejected, never resolved by names or substituted geometry.
 
-Schemas 1/2/3 migrate in memory to schema 4, preserving their existing definitions, identities, tolerance and revision. Missing feature history initializes empty with no rollback; missing references initialize empty. Loading alone does **not** rewrite the scene string; a later explicit committed edit can save the upgraded snapshot. Unsupported document, sketch, feature or reference versions fail closed and leave the original scene property intact. Invalid legacy records likewise remain stored for diagnosis rather than being silently repaired or discarded.
+Schema 5 adds [parameter expression definitions](parameter-expressions.md): a parameter stores either `value` or `expression` alongside `name` and `unit`, never both. Expression values and directed dependencies are reconstructed, not saved caches.
+
+Schemas 1/2/3/4 migrate in memory to schema 5, preserving their existing definitions, identities, tolerance and revision. Missing feature history initializes empty with no rollback; missing references initialize empty. Loading alone does **not** rewrite the scene string; a later explicit committed edit can save the upgraded snapshot. Unsupported document, sketch, feature or reference versions fail closed and leave the original scene property intact. Invalid legacy records likewise remain stored for diagnosis rather than being silently repaired or discarded.
 
 ## Verification and remaining work
 
 `cmake --build build --target check` includes document snapshot checks in Blender and a packaged-addon save/reopen check. Coverage includes all constraint/target encodings, IDs and arbitrary planes, feature records/dependencies/depth inputs, schema migration/future rejection, malformed fields/references/numbers, copy lifetimes, no-op revisions, atomic rejection and revision overflow. The Blender check reopens a constrained circle and its feature-driven extrusion on a rotated/translated plane, rebuilds geometry with a fresh evaluator, and preserves legacy and unsupported-future scene payloads.
 
-Native feature history, named construction references and dependency-checked sketch/feature/reference deletion now exist, but this is not a complete persistence/history UI workflow. The addon duplicates body definitions and reconstructs native state/managed meshes/reference resolution after load and undo/redo; see [Solid integration](solid-integration.md). Reference-consuming features, expression-driven dimensions, history UI and full interactive sketch editing remain incomplete.
+Native feature history, named construction references and dependency-checked sketch/feature/reference deletion now exist, but this is not a complete persistence/history UI workflow. The addon duplicates body definitions and reconstructs native state/managed meshes/reference resolution after load and undo/redo; see [Solid integration](solid-integration.md). Reference-consuming features, expression-driven sketch dimensions, history UI and full interactive sketch editing remain incomplete.
