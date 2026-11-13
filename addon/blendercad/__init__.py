@@ -83,6 +83,8 @@ def _classes():
             state = presentation.runtime(context.scene)
             if state.error:
                 self.layout.label(text=state.error, icon="ERROR")
+            if state.lifecycle_error:
+                self.layout.label(text=state.lifecycle_error, icon="ERROR")
             if state.serialized != serialized or state.scale != presentation.unit_scale(context.scene):
                 self.layout.label(text="Display needs recompute", icon="ERROR")
             for parameter in document.parameters:
@@ -145,7 +147,7 @@ _registered_classes = ()
 def register():
     import bpy
     from bpy.props import EnumProperty, StringProperty
-    from . import capabilities, highlight, operators, presentation
+    from . import capabilities, highlight, lifecycle, operators, presentation
 
     global _registered_classes
     bpy.types.Scene.blendercad_document_snapshot = StringProperty(
@@ -167,10 +169,12 @@ def register():
         operators.register()
         capabilities.register()
         presentation.register()
+        lifecycle.register()
         highlight.register()
     except Exception:
         # Each module unregisters only the hooks it installed.
         highlight.unregister()
+        lifecycle.unregister()
         presentation.unregister()
         capabilities.unregister()
         operators.unregister()
@@ -185,10 +189,11 @@ def register():
 
 def unregister():
     import bpy
-    from . import capabilities, highlight, operators, presentation
+    from . import capabilities, highlight, lifecycle, operators, presentation
 
     global _registered_classes
     highlight.unregister()
+    lifecycle.unregister()
     presentation.unregister()
     capabilities.unregister()
     operators.unregister()

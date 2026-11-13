@@ -46,7 +46,7 @@ def _bodies(scene):
     if state.document is None:
         return
     for host in p.hosts(scene, state.document.id):
-        if not host.visible_get():
+        if not p.visible_in_view(host):
             continue
         try:
             packet = p.current_packet(scene, host)
@@ -54,7 +54,7 @@ def _bodies(scene):
         except ValueError:
             continue
         display = p.display_for(scene, host)
-        if display is not None and display.visible_get():
+        if display is not None and p.visible_in_view(display):
             yield host, packet, inverse
 
 

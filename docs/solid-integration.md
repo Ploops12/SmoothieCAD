@@ -76,6 +76,49 @@ regeneration, duplication and conversion. Per-face material assignment is not
 supported: copying face ordinals after topology changes could apply materials
 to unrelated regions. Persistent region references must precede that feature.
 
+## Visibility and collection lifecycle
+
+`lifecycle.py` is a Blender-only presentation adapter. The Solid host owns
+collection membership, object-level viewport/render visibility, per-ViewLayer
+Hide/Show state and local-view membership. Its managed display follows those
+settings; do not edit the child's visibility as independent design state.
+Parenting alone does not propagate these settings in Blender. Matching the
+host's collections also gives the display Blender's collection visibility,
+render restrictions and ViewLayer exclusions without inventing another set of
+saved CAD visibility definitions. Hosts may belong to several local collections.
+Host viewport hiding does not imply render hiding, matching ordinary Blender
+semantics. A body unavailable at the current rollback point is additionally
+hidden in both viewport and render; returning to the end of history respects
+the host's existing flags instead of unconditionally showing the display.
+
+Changed values are synchronized after main-thread dependency-graph updates,
+before saving, and before the render graph is built. A main-loop timer also
+handles local-view changes and deferred updates. Local-view/picking/highlight
+visibility uses the applicable 3D viewport, not just object-level visibility.
+The timer may take up to approximately 0.2 seconds on an idle main loop; busy
+Blender operations can defer it longer. Synchronization does not solve sketches,
+evaluate features, replace meshes, invalidate current pick tokens, or modify the
+document snapshot/revision. It never forces a graph update inside a graph
+callback, and only writes changed settings to avoid update loops.
+
+Render initialization synchronizes static host visibility before the first
+render, then dependency-graph/timer mutation is disabled until render completion
+or cancellation. Off-main-thread callbacks do not access Blender datablocks.
+Animated visibility changes during a render/animation sequence are not yet a
+supported workflow: they need a frame-evaluation adapter rather than unsafe
+worker-thread scene mutations. Synchronous background Cycles rendering is
+checked; interactive render-thread behavior is not yet acceptance-tested.
+
+The adapter only services already reconstructed current documents. Invalid or
+future snapshots are not parsed, adopted or rewritten by visibility callbacks.
+Linked or multi-scene host/display associations fail validation before any
+visibility changes; the sidebar reports the ownership issue. A collection
+shared into another scene can create the same unsupported ownership condition.
+Resolve it by returning the Solid to one local owning scene before recomputing.
+Presentation changes made during a CAD transaction are journalled along with
+collection links, ViewLayer hide state and local-view membership, so a failed
+publication restores their preceding values.
+
 ## Picking, failures and reconstruction
 
 Every publication gets a fresh random display token, including after load,
@@ -132,10 +175,9 @@ keymaps and several toolbar/menu/property paths cannot currently be universally
 vetoed. There is no after-the-fact deformation acceptance or automatic conversion.
 Unsupported modifications made through those gaps are not CAD edits.
 
-Host visibility through every native Outliner/collection path, collection
-instancing, linked scenes, custom keymaps, origin changes, parent edits and
+Collection instancing, linked scenes, custom keymaps, origin changes, parent edits and
 arbitrary display-data mutations are not yet supported CAD workflows. Do not
-claim Empty parenting alone integrates all Blender visibility/lifecycle rules.
+claim these addon adapters integrate every Blender visibility/lifecycle path.
 Additional audited adapters or native integration are required. Background
 tests cover command execution and ray resolution. An optional isolated-window
 event test covers the standard startup keymap/workspace, not every customized
@@ -154,6 +196,10 @@ generated models or renders in the source tree.
 Injected failures after mesh replacement and conversion detachment/unlinking
 verify snapshot, object/data identity, associations, selection, native queries,
 pick tokens and generated-mesh counts are restored.
+`blender_lifecycle` additionally checks host flags, separate ViewLayers,
+collection moves/exclusions, local view, rollback visibility, snapshot/cache
+stability, ownership rejection, transactional restoration, save/reopen and
+first-render hidden/shown behavior using actual Cycles image pixels.
 
 When `xvfb-run` is installed on the Linux build host, CMake also provides
 `cmake --build build --target check_solid_ui`. It launches a real Blender window
@@ -167,4 +213,6 @@ and are removed by the normal CMake `clean` target. No user preferences are
 saved. This optional test does not establish universal operation protection.
 It also verifies real edge/vertex and perspective-edge events, native inspector
 values, saved references and successful GPU overlay draws in the supported
-OpenGL viewport.
+OpenGL viewport. Native H/Alt-H and Numpad-Slash events verify complete-Solid
+Hide/Show and local-view display/picking without changing the document or mesh
+publication token.

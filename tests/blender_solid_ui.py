@@ -44,6 +44,8 @@ area = None
 region = None
 cursor = (500, 450)
 overlay_before = 0
+visibility_body = None
+visibility_token = None
 
 
 def click_point(point):
@@ -71,7 +73,7 @@ def event(kind, **values):
 
 
 def tick():
-    global step, baseline, host_id, area, region, overlay_before
+    global step, baseline, host_id, area, region, overlay_before, visibility_body, visibility_token
     try:
         scene = bpy.context.scene
         if step == 0:
@@ -187,8 +189,43 @@ def tick():
             assert abs(pick.point_mm[1]) < 1e-5 and abs(pick.point_mm[2] - 5) < 1e-5
             assert abs(p.current_measure(scene, bpy.context.active_object).length_mm - 30) < 1e-6
             verify_overlay()
+            host = bpy.context.active_object
+            visibility_body = host[p.BODY]
+            visibility_token = p.current_packet(scene, host).token
+            baseline = scene.blendercad_document_snapshot
+            event("H")
+        elif step == 19:
+            host = next(host for host in p.hosts(scene, p.read_document(scene).id) if host[p.BODY] == visibility_body)
+            assert host.hide_get() and p.display_for(scene, host).hide_get(), "H did not hide the complete CAD Solid"
+            assert p.current_packet(scene, host).token == visibility_token
+            assert scene.blendercad_document_snapshot == baseline
+            event("H", alt=True)
+        elif step == 20:
+            host = next(host for host in p.hosts(scene, p.read_document(scene).id) if host[p.BODY] == visibility_body)
+            assert not host.hide_get() and not p.display_for(scene, host).hide_get(), "Alt-H did not restore the complete CAD Solid"
+            for obj in bpy.context.selected_objects:
+                obj.select_set(False)
+            host.select_set(True)
+            bpy.context.view_layer.objects.active = host
+            event("NUMPAD_SLASH")
+        elif step == 21:
+            from blendercad import selection
+            host = bpy.context.active_object
+            space = area.spaces.active
+            assert space.local_view is not None and host.local_view_get(space)
+            assert p.display_for(scene, host).local_view_get(space), "Local view omitted the CAD display"
+            with bpy.context.temp_override(area=area, region=region):
+                visible = [owner[p.BODY] for owner, _packet, _inverse in selection._bodies(scene)]
+                assert visible == [visibility_body], "CAD picking included objects outside local view"
+            assert p.current_packet(scene, host).token == visibility_token
+            assert scene.blendercad_document_snapshot == baseline
+            event("NUMPAD_SLASH")
+        elif step == 22:
+            assert area.spaces.active.local_view is None
+            assert scene.blendercad_document_snapshot == baseline
             (options.output_dir / "result.json").write_text(json.dumps({"passed": True, "capability_calls": capability_calls,
-                "cad_selection_kinds": ["FACE", "EDGE", "VERTEX"], "overlay_draw_count": highlight.draw_count}))
+                "cad_selection_kinds": ["FACE", "EDGE", "VERTEX"], "overlay_draw_count": highlight.draw_count,
+                "visibility_events": ["H", "ALT_H", "LOCAL_VIEW"]}))
             bpy.ops.wm.quit_blender()
             return None
         step += 1

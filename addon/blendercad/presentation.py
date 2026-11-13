@@ -48,6 +48,12 @@ def selected_hosts(context):
     return result
 
 
+def visible_in_view(obj):
+    space = bpy.context.space_data
+    viewport = space if space is not None and space.type == "VIEW_3D" else None
+    return obj.visible_get(viewport=viewport)
+
+
 def hosts(scene, document_id):
     return [obj for obj in scene.objects if obj.get(ROLE) == "SOLID" and obj.get(DOC) == document_id]
 
@@ -150,6 +156,7 @@ class Runtime:
         self.scale = None
         self.packets = {}
         self.error = ""
+        self.lifecycle_error = ""
         self.last_pick = None
         self.selected_picks = []
         self.last_measure = None
@@ -313,7 +320,13 @@ class _Journal:
         if obj.type == "MESH":
             saved["data"] = obj.data
         properties = {key: obj[key] for key in obj.keys() if key.startswith("blendercad_")}
-        self.records[obj.as_pointer()] = obj, saved, properties
+        collections = tuple(obj.users_collection)
+        hidden = [(layer, obj.hide_get(view_layer=layer)) for scene in obj.users_scene
+                  for layer in scene.view_layers if obj.name in layer.objects]
+        from . import lifecycle
+        local = [(space, obj.local_view_get(space)) for scene in obj.users_scene
+                 for space in lifecycle._spaces(scene) if space.local_view is not None]
+        self.records[obj.as_pointer()] = obj, saved, properties, collections, hidden, local
 
     def retire_mesh(self, mesh):
         if mesh not in self.obsolete_meshes:
@@ -333,7 +346,12 @@ class _Journal:
             for collection in collections:
                 if obj.name not in collection.objects:
                     collection.objects.link(obj)
-        for obj, saved, properties in reversed(tuple(self.records.values())):
+        hidden_objects = []
+        for obj, saved, properties, collections, hidden, local in reversed(tuple(self.records.values())):
+            for collection in set(collections) - set(obj.users_collection):
+                collection.objects.link(obj)
+            for collection in set(obj.users_collection) - set(collections):
+                collection.objects.unlink(obj)
             for key, value in saved.items():
                 setattr(obj, key, value)
             for key in list(obj.keys()):
@@ -341,6 +359,19 @@ class _Journal:
                     del obj[key]
             for key, value in properties.items():
                 obj[key] = value
+            hidden_objects.append((obj, hidden))
+            for space, value in local:
+                if space.local_view is not None:
+                    obj.local_view_set(space, value)
+        # Relinking collections can destroy/recreate ViewLayer Bases. Refresh
+        # them before restoring per-layer hide flags, including inactive layers.
+        layers = {layer for _obj, hidden in hidden_objects for layer, _value in hidden}
+        for layer in layers:
+            layer.update()
+        for obj, hidden in hidden_objects:
+            for layer, value in hidden:
+                if obj.name in layer.objects:
+                    obj.hide_set(value, view_layer=layer)
         if self.view_layer:
             self.view_layer.update()
             for obj in self.view_layer.objects:
@@ -448,8 +479,9 @@ def _publish(scene, document, prepared, journal):
             display["blendercad_current"] = False
             display.color = (1, 0.08, 0.04, 1)
         if display is not None:
-            display.hide_viewport = body is None
-            display.hide_render = body is None
+            from . import lifecycle
+            display[lifecycle.AVAILABLE] = body is not None
+            lifecycle.sync_pair(scene, host, display)
     for host in existing:
         if host[BODY] not in definitions:
             remove_host(scene, host, journal)
@@ -462,14 +494,16 @@ def _publish(scene, document, prepared, journal):
 
 
 def publish(scene, document, prepared):
+    from . import lifecycle
     journal = _Journal(scene)
     previous = runtime(scene)
-    try:
-        report = _publish(scene, document, prepared, journal)
-    except Exception:
-        journal.rollback()
-        restore_runtime(scene, previous)
-        raise
+    with lifecycle.suspended():
+        try:
+            report = _publish(scene, document, prepared, journal)
+        except Exception:
+            journal.rollback()
+            restore_runtime(scene, previous)
+            raise
     journal.finish()
     return report
 
@@ -536,7 +570,7 @@ def visible_selection(scene):
     by_body = {host.get(BODY): host for host in hosts(scene, state.document.id)}
     for pick in state.selected_picks:
         host = by_body.get(pick.body_id)
-        if host is None or not host.select_get() or not host.visible_get():
+        if host is None or not host.select_get() or not visible_in_view(host):
             continue
         try:
             packet = current_packet(scene, host, pick.token)
@@ -545,7 +579,7 @@ def visible_selection(scene):
         except ValueError:
             continue
         display = display_for(scene, host)
-        if display is None or not display.visible_get():
+        if display is None or not visible_in_view(display):
             continue
         yield host, pick, packet
 

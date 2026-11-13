@@ -200,7 +200,7 @@ with tempfile.TemporaryDirectory() as directory:
         commands.set_depth(bpy.context, front_feature, 0)
         bpy.context.view_layer.update()
         assert p.pick_ray(scene, (0.015, 0.01, 0.1), (0, 0, -1), bpy.context.evaluated_depsgraph_get()) is None
-        p.display_for(scene, front).hide_set(True)
+        front.hide_set(True)  # Host owns visibility, including last-good displays.
         bpy.context.view_layer.update()
         unblocked = p.pick_ray(scene, (0.015, 0.01, 0.1), (0, 0, -1), bpy.context.evaluated_depsgraph_get())
         assert unblocked and unblocked[0] == host
