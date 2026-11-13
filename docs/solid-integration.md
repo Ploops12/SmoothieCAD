@@ -82,16 +82,18 @@ Every publication gets a fresh random display token, including after load,
 undo/redo and a cache-reused recomputation. `current_packet` checks the raw
 scene snapshot, scene unit scale, body association, current-result state and
 display token. `resolve` validates face/edge/vertex indices against that packet.
-`pick_ray` refines a triangle hit to its evaluated-local CAD face and checks
-normal scene occlusion; the click operator selects the owning host. Shift-click
-extends selection. Interactive edge/vertex snapping/highlighting and precise
-analytic hit refinement are not implemented.
+`pick_ray` now intersects the current B-rep rather than accepting the display
+triangle silhouette. Face/Edge/Vertex modes provide current subelement picks,
+exact trimmed point projection, native measurements and GPU highlights. The
+click operator selects the owning host; Shift-click toggles subelements. See
+[selection and query services](selection-and-queries.md) for clipping, occlusion,
+perspective handling, transient selection lifecycle and curve-candidate limits.
 
 **These picks are not persistent design references.** They must not be saved
 or fed into downstream CAD features as stable face/edge identities. The
 [reference service](persistent-references.md) now translates a current pick
 into a construction-derived target and exposes split/merged/deleted/ambiguous/
-unavailable states. Save Picked Face Reference and Repair From Picked Face
+unavailable states. Save CAD Selection Reference and Repair From Selection
 operate on these stable targets, not on saved display indices.
 
 Failed or blocked features retain their last-valid display and expose state
@@ -163,3 +165,6 @@ guards. This caught and prevents regression of nested-operator undo loss.
 Logs, configuration and temporary recovery files remain under `build/ui-tests`
 and are removed by the normal CMake `clean` target. No user preferences are
 saved. This optional test does not establish universal operation protection.
+It also verifies real edge/vertex and perspective-edge events, native inspector
+values, saved references and successful GPU overlay draws in the supported
+OpenGL viewport.

@@ -44,4 +44,4 @@ if returncode or not result_file.exists():
 report = json.loads(result_file.read_text())
 if not report["passed"]:
     raise SystemExit(report["error"])
-print("Blender UI check passed: click selection, protected shortcuts, duplication, dialog cancellation, conversion undo")
+print("Blender UI check passed: CAD face/edge/vertex selection, perspective snapping, GPU overlays, references and command undo")

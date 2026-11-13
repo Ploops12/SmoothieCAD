@@ -125,17 +125,18 @@ bookmarks whose creators are removed.
 
 ## Blender workflow
 
-Click a current CAD face, then use **Save Picked Face Reference** in the sidebar.
+Choose Face, Edge or Vertex mode, click a current CAD region, then use **Save CAD Selection Reference** in the sidebar.
 Named reference state and repair diagnostics appear in the sidebar. To repair,
-click a different uniquely nameable current face and use **Repair From Picked
-Face** on the existing record. **Remove Reference** deletes only that bookmark.
+click a different uniquely nameable current region and use **Repair From
+Selection** on the existing record. **Remove Reference** deletes only that bookmark.
 Each command is undoable through the same transaction path as other CAD edits.
 
 Every display publication clears the picked-element token, even when geometry
 was cached. A stale pick or last-good failed display cannot create/repair a
-reference. Mouse selection currently captures faces; native capture supports
-all three topology kinds. Edge/vertex UI selection, highlighting, analytic hit
-refinement and reference-consuming modelling features remain follow-up work.
+reference. Mouse selection and native capture now support all three topology
+kinds; see [selection and queries](selection-and-queries.md) for highlighting,
+trimmed closest points, exact face rays and inspector values. Reference-consuming
+modelling features and complete sketch/gizmo interaction remain follow-up work.
 
 ## Verification
 

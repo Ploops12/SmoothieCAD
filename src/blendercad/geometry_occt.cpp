@@ -2,6 +2,7 @@
 
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -10,17 +11,22 @@
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepGProp.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepLProp_SLProps.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRep_Tool.hxx>
 #include <GCPnts_QuasiUniformDeflection.hxx>
 #include <GProp_GProps.hxx>
+#include <IntCurvesFace_ShapeIntersector.hxx>
 #include <DESTEP_Parameters.hxx>
 #include <Poly_Triangulation.hxx>
+#include <Precision.hxx>
 #include <STEPControl_Reader.hxx>
 #include <STEPControl_Writer.hxx>
 #include <Standard_Version.hxx>
+#include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
@@ -29,6 +35,9 @@
 #include <TopTools_ListOfShape.hxx>
 #include <TopTools_ListIteratorOfListOfShape.hxx>
 #include <gp_Circ.hxx>
+#include <gp_Cylinder.hxx>
+#include <gp_Sphere.hxx>
+#include <gp_Lin.hxx>
 
 #include <cmath>
 #include <algorithm>
@@ -72,6 +81,29 @@ gp_Vec plane_normal(const SketchPlane& plane) {
 
 void append_point(std::vector<double>& output, const gp_Pnt& point) {
     output.insert(output.end(), {point.X(), point.Y(), point.Z()});
+}
+
+Vector3 public_point(const gp_Pnt& point) {
+    if (!std::isfinite(point.X()) || !std::isfinite(point.Y()) || !std::isfinite(point.Z())) {
+        throw std::runtime_error("kernel query returned a non-finite point");
+    }
+    return {point.X(), point.Y(), point.Z()};
+}
+
+gp_Pnt query_point(Vector3 point, const char* context) {
+    if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) {
+        throw std::invalid_argument(std::string(context) + " must contain finite coordinates");
+    }
+    return {point.x, point.y, point.z};
+}
+
+std::size_t query_slot(TopologyKind kind) {
+    switch (kind) {
+    case TopologyKind::Face: return 0;
+    case TopologyKind::Edge: return 1;
+    case TopologyKind::Vertex: return 2;
+    }
+    throw std::invalid_argument("invalid topology kind");
 }
 
 double maximum_tolerance(const TopoDS_Shape& shape) {
@@ -393,6 +425,103 @@ public:
         return lookup_record(handle).topology;
     }
 
+    TopologyMeasure measure(ShapeHandle handle, TopologyElement element) const override {
+        const auto target = lookup_element(handle, element);
+        TopologyMeasure result{element, {}, {}, {}, {}};
+        if (element.kind == TopologyKind::Vertex) {
+            result.center_mm = public_point(BRep_Tool::Pnt(TopoDS::Vertex(target)));
+            return result;
+        }
+        GProp_GProps properties;
+        if (element.kind == TopologyKind::Edge) {
+            const auto edge = TopoDS::Edge(target);
+            BRepGProp::LinearProperties(edge, properties);
+            result.length_mm = properties.Mass();
+            if (BRep_Tool::Degenerated(edge)) {
+                TopTools_IndexedMapOfShape vertices;
+                TopExp::MapShapes(edge, TopAbs_VERTEX, vertices);
+                if (vertices.Extent() == 0) throw std::runtime_error("degenerate edge has no measurable point");
+                result.center_mm = public_point(BRep_Tool::Pnt(TopoDS::Vertex(vertices(1))));
+                return result;
+            }
+            const BRepAdaptor_Curve curve(edge);
+            if (curve.GetType() == GeomAbs_Circle) result.radius_mm = curve.Circle().Radius();
+        } else {
+            const auto face = TopoDS::Face(target);
+            BRepGProp::SurfaceProperties(face, properties);
+            result.area_mm2 = properties.Mass();
+            const BRepAdaptor_Surface surface(face, true);
+            if (surface.GetType() == GeomAbs_Cylinder) result.radius_mm = surface.Cylinder().Radius();
+            else if (surface.GetType() == GeomAbs_Sphere) result.radius_mm = surface.Sphere().Radius();
+        }
+        if (!std::isfinite(properties.Mass()) || properties.Mass() < 0) {
+            throw std::runtime_error("kernel query returned an invalid topology measure");
+        }
+        result.center_mm = public_point(properties.CentreOfMass());
+        return result;
+    }
+
+    TopologyPoint closest_point(ShapeHandle handle, TopologyElement element, Vector3 point_mm) const override {
+        const auto point = query_point(point_mm, "query point");
+        const auto target = lookup_element(handle, element);
+        // Unlike projection onto a supporting surface/curve, distance to this
+        // topological subshape respects trimming wires, holes and endpoints.
+        BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(point).Vertex(), target,
+                                           std::min(budget_mm_, Precision::Confusion()));
+        if (!distance.IsDone() || distance.NbSolution() == 0 || !std::isfinite(distance.Value())) {
+            throw std::runtime_error("could not find the closest point on trimmed CAD topology");
+        }
+        return {element, public_point(distance.PointOnShape2(1)), distance.Value()};
+    }
+
+    std::optional<FaceHit> ray_cast(ShapeHandle handle, Vector3 origin_mm, Vector3 direction,
+                                  double max_distance_mm) const override {
+        const auto origin = query_point(origin_mm, "ray origin");
+        (void)query_point(direction, "ray direction");
+        const auto direction_scale = std::max({std::abs(direction.x), std::abs(direction.y), std::abs(direction.z)});
+        if (direction_scale <= 0) {
+            throw std::invalid_argument("ray direction must have finite nonzero length");
+        }
+        const Vector3 scaled{direction.x / direction_scale, direction.y / direction_scale, direction.z / direction_scale};
+        const auto magnitude = std::hypot(scaled.x, scaled.y, scaled.z);
+        if (!std::isfinite(max_distance_mm) || max_distance_mm <= 0) {
+            throw std::invalid_argument("ray maximum distance must be finite and positive");
+        }
+        const auto shape = lookup(handle);
+        const auto maps = topology_maps(shape);
+        const gp_Dir unit(scaled.x / magnitude, scaled.y / magnitude, scaled.z / magnitude);
+        IntCurvesFace_ShapeIntersector intersector;
+        intersector.Load(shape, std::min(budget_mm_, Precision::Confusion()));
+        intersector.Perform(gp_Lin(origin, unit), 0, max_distance_mm);
+        if (!intersector.IsDone()) throw std::runtime_error("CAD ray intersection failed");
+        std::optional<FaceHit> nearest;
+        for (int index = 1; index <= intersector.NbPnt(); ++index) {
+            const double distance = intersector.WParameter(index);
+            if (!std::isfinite(distance) || distance < 0 || distance > max_distance_mm) continue;
+            if (nearest && distance >= nearest->distance_mm) continue;
+            const int face_index = find_same(maps[0], intersector.Face(index));
+            if (face_index == 0) throw std::runtime_error("ray hit has no authoritative CAD face identity");
+            const auto face = TopoDS::Face(maps[0](face_index));
+            std::optional<Vector3> normal;
+            try {
+                const BRepAdaptor_Surface surface(face, true);
+                BRepLProp_SLProps properties(surface, intersector.UParameter(index), intersector.VParameter(index),
+                                            1, std::min(budget_mm_, Precision::Confusion()));
+                if (properties.IsNormalDefined() && (face.Orientation() == TopAbs_FORWARD || face.Orientation() == TopAbs_REVERSED)) {
+                    auto value = properties.Normal();
+                    if (face.Orientation() == TopAbs_REVERSED) value.Reverse();
+                    normal = Vector3{value.X(), value.Y(), value.Z()};
+                }
+            } catch (const Standard_Failure&) {
+                // A valid trimmed intersection can lie at a surface singularity
+                // where differential normal evaluation is undefined.
+                normal.reset();
+            }
+            nearest = FaceHit{static_cast<std::uint32_t>(face_index - 1), public_point(intersector.Pnt(index)), normal, distance};
+        }
+        return nearest;
+    }
+
     void release(ShapeHandle handle) override {
         validate_owner(handle);
         std::lock_guard lock(mutex_);
@@ -406,6 +535,16 @@ private:
         TopoDS_Shape shape;
         GeometryTopology topology;
     };
+
+    TopoDS_Shape lookup_element(ShapeHandle handle, TopologyElement element) const {
+        const auto shape = lookup(handle);
+        const auto maps = topology_maps(shape);
+        const auto slot = query_slot(element.kind);
+        if (element.index >= static_cast<std::uint32_t>(maps[slot].Extent())) {
+            throw std::invalid_argument("topology index is out of range for this evaluated shape");
+        }
+        return maps[slot](static_cast<int>(element.index + 1));
+    }
 
     template <typename BooleanOperation>
     static std::vector<TopologyHistoryEntry> history_for(BooleanOperation& operation,

@@ -101,7 +101,7 @@ def save_reference(context, name, reference_id=""):
     document, hosts = selected(context, "edit_definition")
     host = p.host_for(context.active_object)
     if host not in hosts:
-        raise ValueError("Select the CAD Solid containing the picked face")
+        raise ValueError("Select the CAD Solid containing the picked region")
     state = p.runtime(context.scene)
     target = p.persistent_target(context.scene, host, state.last_pick)
     if reference_id:

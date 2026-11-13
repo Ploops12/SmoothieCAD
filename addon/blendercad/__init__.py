@@ -78,11 +78,12 @@ def _classes():
             self.layout.operator("blendercad.add_rectangle_solid", icon="MESH_CUBE")
             self.layout.operator("blendercad.parameter")
             self.layout.operator("blendercad.recompute", icon="FILE_REFRESH")
+            self.layout.prop(context.scene, "blendercad_selection_mode", expand=True)
             from . import presentation
             state = presentation.runtime(context.scene)
             if state.error:
                 self.layout.label(text=state.error, icon="ERROR")
-            if state.serialized != serialized:
+            if state.serialized != serialized or state.scale != presentation.unit_scale(context.scene):
                 self.layout.label(text="Display needs recompute", icon="ERROR")
             for parameter in document.parameters:
                 self.layout.label(text=f"{parameter.name}: {parameter.value:g} {parameter.unit}")
@@ -99,7 +100,7 @@ def _classes():
                 box.label(text=f"{reference.name}: {label}")
                 if resolution and resolution.state != _native.ReferenceState.RESOLVED:
                     box.label(text=resolution.diagnostic, icon="ERROR")
-                operator = box.operator("blendercad.save_reference", text="Repair From Picked Face")
+                operator = box.operator("blendercad.save_reference", text="Repair From Selection")
                 operator.reference_id = reference.id
                 operator = box.operator("blendercad.erase_reference", text="Remove Reference")
                 operator.reference_id = reference.id
@@ -112,6 +113,23 @@ def _classes():
                 display = presentation.display_for(context.scene, host)
                 if display is not None:
                     box.template_ID(display, "active_material", new="material.new")
+                measure = presentation.current_measure(context.scene, host)
+                if measure is not None:
+                    box.label(text=f"CAD {measure.element.kind.name.lower()} selection")
+                    if measure.length_mm is not None:
+                        box.label(text=f"Length: {measure.length_mm:.8g} mm")
+                    if measure.area_mm2 is not None:
+                        box.label(text=f"Area: {measure.area_mm2:.8g} mm²")
+                    if measure.radius_mm is not None:
+                        box.label(text=f"Radius: {measure.radius_mm:.8g} mm")
+                    if measure.element.kind == _native.TopologyKind.VERTEX:
+                        value = measure.center_mm
+                        box.label(text=f"Local point: {value.x:.6g}, {value.y:.6g}, {value.z:.6g} mm")
+                    if state.reference_error:
+                        box.label(text=state.reference_error, icon="ERROR")
+                from . import highlight
+                if highlight.last_error:
+                    box.label(text="Selection overlay unavailable", icon="ERROR")
                 box.operator("blendercad.duplicate_solid")
                 box.operator("blendercad.save_reference")
                 box.operator("blendercad.frame_solid")
@@ -126,8 +144,8 @@ _registered_classes = ()
 
 def register():
     import bpy
-    from bpy.props import StringProperty
-    from . import capabilities, operators, presentation
+    from bpy.props import EnumProperty, StringProperty
+    from . import capabilities, highlight, operators, presentation
 
     global _registered_classes
     bpy.types.Scene.blendercad_document_snapshot = StringProperty(
@@ -137,6 +155,11 @@ def register():
         options={"HIDDEN"},
         update=presentation.invalidate_snapshot,
     )
+    bpy.types.Scene.blendercad_selection_mode = EnumProperty(
+        name="CAD Selection", items=(("FACE", "Face", "Select CAD faces"),
+                                     ("EDGE", "Edge", "Select CAD edges"),
+                                     ("VERTEX", "Vertex", "Select CAD vertices")), default="FACE",
+    )
     _registered_classes = _classes()
     try:
         for cls in _registered_classes:
@@ -144,8 +167,10 @@ def register():
         operators.register()
         capabilities.register()
         presentation.register()
+        highlight.register()
     except Exception:
         # Each module unregisters only the hooks it installed.
+        highlight.unregister()
         presentation.unregister()
         capabilities.unregister()
         operators.unregister()
@@ -153,15 +178,17 @@ def register():
             if hasattr(bpy.types, cls.__name__):
                 bpy.utils.unregister_class(cls)
         del bpy.types.Scene.blendercad_document_snapshot
+        del bpy.types.Scene.blendercad_selection_mode
         _registered_classes = ()
         raise
 
 
 def unregister():
     import bpy
-    from . import capabilities, operators, presentation
+    from . import capabilities, highlight, operators, presentation
 
     global _registered_classes
+    highlight.unregister()
     presentation.unregister()
     capabilities.unregister()
     operators.unregister()
@@ -170,3 +197,5 @@ def unregister():
     _registered_classes = ()
     if hasattr(bpy.types.Scene, "blendercad_document_snapshot"):
         del bpy.types.Scene.blendercad_document_snapshot
+    if hasattr(bpy.types.Scene, "blendercad_selection_mode"):
+        del bpy.types.Scene.blendercad_selection_mode

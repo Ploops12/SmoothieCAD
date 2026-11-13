@@ -131,9 +131,9 @@ class BLENDERCAD_OT_frame_solid(SolidOperator, bpy.types.Operator):
 
 class BLENDERCAD_OT_save_reference(SolidOperator, bpy.types.Operator):
     bl_idname = "blendercad.save_reference"
-    bl_label = "Save Picked Face Reference"
-    bl_description = "Save the picked CAD face's persistent construction identity, or explicitly repair an existing reference"
-    name: StringProperty(name="Reference name", default="Face reference")
+    bl_label = "Save CAD Selection Reference"
+    bl_description = "Save the selected CAD face, edge or vertex's persistent identity, or explicitly repair an existing reference"
+    name: StringProperty(name="Reference name", default="CAD reference")
     reference_id: StringProperty(options={"HIDDEN"})
 
     def invoke(self, context, event):
@@ -186,23 +186,24 @@ class BLENDERCAD_OT_pick_solid(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.area is not None and context.area.type == "VIEW_3D" and context.region.type == "WINDOW" and context.mode == "OBJECT"
+        return (p._native is not None and context.scene is not None
+                and bool(context.scene.blendercad_document_snapshot)
+                and context.area is not None and context.area.type == "VIEW_3D"
+                and context.region is not None and context.region.type == "WINDOW" and context.mode == "OBJECT")
 
     def invoke(self, context, event):
-        from bpy_extras import view3d_utils
+        from . import selection
         position = event.mouse_region_x, event.mouse_region_y
-        origin = view3d_utils.region_2d_to_origin_3d(context.region, context.region_data, position)
-        direction = view3d_utils.region_2d_to_vector_3d(context.region, context.region_data, position)
-        hit = p.pick_ray(context.scene, origin, direction, context.evaluated_depsgraph_get())
-        if hit is None:
-            return {"PASS_THROUGH"}
-        host, _pick = hit
-        if not self.extend:
-            for obj in context.selected_objects:
-                obj.select_set(False)
-        host.select_set(not host.select_get() if self.extend else True)
-        context.view_layer.objects.active = host
-        p.runtime(context.scene).last_pick = _pick if host.select_get() else None
+        try:
+            hit = selection.pick_screen(context.scene, context.region, context.region_data, position,
+                                        context.scene.blendercad_selection_mode,
+                                        depsgraph=context.evaluated_depsgraph_get())
+            if hit is None:
+                return {"PASS_THROUGH"}
+            p.apply_pick(context, *hit, extend=self.extend)
+        except (ValueError, RuntimeError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
         return {"FINISHED"}
 
 

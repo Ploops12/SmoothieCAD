@@ -82,7 +82,7 @@ if(BLENDERCAD_BUILD_PYTHON)
     find_package(Python 3.14 EXACT COMPONENTS Interpreter Development.Module REQUIRED)
     blendercad_resolve_pybind11()
 
-    pybind11_add_module(_native MODULE bindings/module.cpp bindings/sketch.cpp bindings/document.cpp bindings/evaluation.cpp bindings/reference.cpp bindings/topology.cpp)
+    pybind11_add_module(_native MODULE bindings/module.cpp bindings/sketch.cpp bindings/document.cpp bindings/evaluation.cpp bindings/reference.cpp bindings/topology.cpp bindings/queries.cpp)
     target_link_libraries(_native PRIVATE BlenderCAD::Core)
     target_include_directories(_native PRIVATE ${OpenCASCADE_INCLUDE_DIR})
     target_compile_definitions(_native PRIVATE BLENDERCAD_VERSION="${PROJECT_VERSION}")
@@ -118,7 +118,7 @@ if(BLENDERCAD_BUILD_PYTHON)
                 --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/native_features.py"
                 -- --module-dir "$<TARGET_FILE_DIR:_native>"
         )
-        foreach(_reference_check IN ITEMS native_topology native_references)
+        foreach(_reference_check IN ITEMS native_topology native_references native_queries native_query_guards)
             add_test(NAME ${_reference_check}
                 COMMAND "${BLENDERCAD_BLENDER_EXECUTABLE}" --background --factory-startup
                     --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/${_reference_check}.py"
@@ -134,14 +134,14 @@ if(BLENDERCAD_BUILD_PYTHON)
                 --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/blender_foundation.py"
                 -- --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
         )
-        foreach(_blendercad_check IN ITEMS blender_solids blender_capabilities blender_references)
+        foreach(_blendercad_check IN ITEMS blender_solids blender_capabilities blender_references blender_selection highlight_arrays)
             add_test(NAME ${_blendercad_check}
                 COMMAND "${BLENDERCAD_BLENDER_EXECUTABLE}" --background --factory-startup
                     --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/${_blendercad_check}.py"
                     -- --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
             )
         endforeach()
-        set_tests_properties(native_geometry native_sketch document_snapshot native_features native_topology native_references blender_foundation blender_solids blender_capabilities blender_references PROPERTIES
+        set_tests_properties(native_geometry native_sketch document_snapshot native_features native_topology native_references native_queries native_query_guards blender_foundation blender_solids blender_capabilities blender_references blender_selection highlight_arrays PROPERTIES
             ENVIRONMENT "ALSOFT_DRIVERS=null"
         )
         add_custom_target(check

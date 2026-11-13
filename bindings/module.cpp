@@ -19,6 +19,7 @@ void bind_document(py::module_& module);
 void bind_evaluation(py::module_& module);
 void bind_topology(py::module_& module);
 void bind_reference(py::module_& module);
+void bind_queries(py::module_& module);
 
 PYBIND11_MODULE(_native, module) {
     module.doc() = "BlenderCAD native foundation";
@@ -82,6 +83,7 @@ PYBIND11_MODULE(_native, module) {
     module.def("new_geometry_adapter", &blendercad::make_occt_geometry_adapter,
                py::arg("geometric_budget_mm") = 0.001);
     bind_topology(module);
+    bind_queries(module);
     bind_reference(module);
     bind_sketch(module);
     bind_document(module);

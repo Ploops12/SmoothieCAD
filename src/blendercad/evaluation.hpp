@@ -2,6 +2,7 @@
 
 #include "blendercad/document.hpp"
 #include "blendercad/geometry.hpp"
+#include "blendercad/geometry_queries.hpp"
 #include "blendercad/sketch_solver.hpp"
 
 #include <memory>
@@ -74,6 +75,14 @@ public:
     [[nodiscard]] PersistentReference capture_reference(const Document& document, const DocumentId& body,
                                                         TopologyKind kind, std::uint32_t index) const;
     [[nodiscard]] ReferenceResolution resolve_reference(const Document& document, const PersistentReference& reference) const;
+    [[nodiscard]] TopologyMeasure measure_element(const Document& document, const DocumentId& body, TopologyElement element) const;
+    [[nodiscard]] TopologyMeasure measure_reference(const Document& document, const PersistentReference& reference) const;
+    [[nodiscard]] TopologyPoint closest_point_element(const Document& document, const DocumentId& body,
+                                                     TopologyElement element, Vector3 point_mm) const;
+    [[nodiscard]] TopologyPoint closest_point_reference(const Document& document, const PersistentReference& reference,
+                                                       Vector3 point_mm) const;
+    [[nodiscard]] std::optional<FaceHit> ray_cast(const Document& document, const DocumentId& body,
+                                               Vector3 origin_mm, Vector3 direction, double max_distance_mm) const;
     [[nodiscard]] EvaluatedDisplay tessellate(const Document& document, const DocumentId& body,
                                              double linear_deflection_mm, double angular_deflection_rad) const;
     void write_step(const Document& document, const DocumentId& body, const std::string& path) const;

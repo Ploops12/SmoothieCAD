@@ -359,6 +359,44 @@ double FeatureEvaluator::volume_mm3(const Document& document, const DocumentId& 
     return shape->kernel->volume_mm3(shape->handle);
 }
 
+TopologyMeasure FeatureEvaluator::measure_element(const Document& document, const DocumentId& body,
+                                                  TopologyElement element) const {
+    (void)impl_->body(document, body, true);
+    const auto shape = impl_->displays.at(body.to_string());
+    return shape->kernel->measure(shape->handle, element);
+}
+
+TopologyMeasure FeatureEvaluator::measure_reference(const Document& document, const PersistentReference& reference) const {
+    const auto resolution = resolve_reference(document, reference);
+    if (resolution.state != ReferenceState::Resolved || resolution.candidates.size() != 1) {
+        throw std::runtime_error("Cannot measure an unresolved reference: " + resolution.diagnostic);
+    }
+    return measure_element(document, reference.body, resolution.candidates.front());
+}
+
+TopologyPoint FeatureEvaluator::closest_point_element(const Document& document, const DocumentId& body,
+                                                      TopologyElement element, Vector3 point_mm) const {
+    (void)impl_->body(document, body, true);
+    const auto shape = impl_->displays.at(body.to_string());
+    return shape->kernel->closest_point(shape->handle, element, point_mm);
+}
+
+TopologyPoint FeatureEvaluator::closest_point_reference(const Document& document, const PersistentReference& reference,
+                                                        Vector3 point_mm) const {
+    const auto resolution = resolve_reference(document, reference);
+    if (resolution.state != ReferenceState::Resolved || resolution.candidates.size() != 1) {
+        throw std::runtime_error("Cannot snap to an unresolved reference: " + resolution.diagnostic);
+    }
+    return closest_point_element(document, reference.body, resolution.candidates.front(), point_mm);
+}
+
+std::optional<FaceHit> FeatureEvaluator::ray_cast(const Document& document, const DocumentId& body,
+                                                Vector3 origin_mm, Vector3 direction, double max_distance_mm) const {
+    (void)impl_->body(document, body, true);
+    const auto shape = impl_->displays.at(body.to_string());
+    return shape->kernel->ray_cast(shape->handle, origin_mm, direction, max_distance_mm);
+}
+
 EvaluatedDisplay FeatureEvaluator::tessellate(const Document& document, const DocumentId& id,
                                              double linear_deflection_mm, double angular_deflection_rad) const {
     const auto& body = impl_->body(document, id, false);

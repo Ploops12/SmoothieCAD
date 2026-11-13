@@ -49,6 +49,20 @@ void bind_evaluation(py::module_& module) {
             return evaluator.capture_reference(document, DocumentId::parse(body), kind, index);
         })
         .def("resolve_reference", &FeatureEvaluator::resolve_reference)
+        .def("measure_element", [](const FeatureEvaluator& evaluator, const Document& document,
+                                   const std::string& body, TopologyElement element) {
+            return evaluator.measure_element(document, DocumentId::parse(body), element);
+        })
+        .def("measure_reference", &FeatureEvaluator::measure_reference)
+        .def("closest_point_element", [](const FeatureEvaluator& evaluator, const Document& document,
+                                         const std::string& body, TopologyElement element, Vector3 point) {
+            return evaluator.closest_point_element(document, DocumentId::parse(body), element, point);
+        })
+        .def("closest_point_reference", &FeatureEvaluator::closest_point_reference)
+        .def("ray_cast", [](const FeatureEvaluator& evaluator, const Document& document, const std::string& body,
+                            Vector3 origin, Vector3 direction, double max_distance) {
+            return evaluator.ray_cast(document, DocumentId::parse(body), origin, direction, max_distance);
+        }, py::arg("document"), py::arg("body"), py::arg("origin_mm"), py::arg("direction"), py::arg("max_distance_mm") = 1e12)
         .def("volume_mm3", [](const FeatureEvaluator& evaluator, const Document& document, const std::string& body) {
             return evaluator.volume_mm3(document, DocumentId::parse(body));
         })

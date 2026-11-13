@@ -104,6 +104,7 @@ class Packet:
     token: str
     bvh: object
     mesh: object
+    overlays: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,8 @@ class Pick:
     token: str
     kind: str
     index: int
+    point_mm: tuple | None = None
+    normal: tuple | None = None
 
 
 @dataclass
@@ -138,6 +141,8 @@ def discard_prepared(prepared):
 
 class Runtime:
     def __init__(self, evaluator=None):
+        if _native is None:
+            raise ValueError("Native module is not installed")
         self.evaluator = evaluator if evaluator is not None else _native.FeatureEvaluator()
         self.document = None
         self.report = None
@@ -146,6 +151,9 @@ class Runtime:
         self.packets = {}
         self.error = ""
         self.last_pick = None
+        self.selected_picks = []
+        self.last_measure = None
+        self.reference_error = ""
 
 
 _runtimes = {}
@@ -165,6 +173,9 @@ def invalidate_snapshot(scene, _context):
         invalid.serialized = None
         invalid.packets = {}
         invalid.last_pick = None
+        invalid.selected_picks = []
+        invalid.last_measure = None
+        invalid.reference_error = ""
         _runtimes[scene.as_pointer()] = invalid
 
 
@@ -487,19 +498,19 @@ def current_packet(scene, host, token=None):
     return packet
 
 
-def resolve(scene, host, kind, index, token):
+def resolve(scene, host, kind, index, token, point_mm=None, normal=None):
     packet = current_packet(scene, host, token)
     arrays = packet.arrays
     counts = {"FACE": arrays["face_count"], "EDGE": len(arrays["edge_offsets"]) - 1,
               "VERTEX": len(arrays["cad_vertices"]) // 3}
     if kind not in counts or isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < counts[kind]:
         raise ValueError("Invalid evaluated CAD topology index")
-    return Pick(arrays["document_id"], arrays["body_id"], arrays["feature_id"], arrays["revision"], token, kind, index)
+    return Pick(arrays["document_id"], arrays["body_id"], arrays["feature_id"], arrays["revision"], token, kind, index, point_mm, normal)
 
 
 def persistent_target(scene, host, pick):
     if pick is None or pick.body_id != host.get(BODY) or pick.document_id != host.get(DOC):
-        raise ValueError("Click a face on the active CAD Solid first")
+        raise ValueError("Select a CAD face, edge or vertex on the active Solid first")
     current_packet(scene, host, pick.token)
     state = runtime(scene)
     return state.evaluator.capture_reference(state.document, pick.body_id,
@@ -507,37 +518,100 @@ def persistent_target(scene, host, pick):
 
 
 def pick_ray(scene, origin, direction, depsgraph=None):
-    """Face picking with native Blender occlusion; no saved reference is made."""
+    from .selection import pick_ray as exact_pick
+    return exact_pick(scene, origin, direction, depsgraph)
+
+
+def pick_key(pick):
+    return pick.document_id, pick.body_id, pick.token, pick.kind, pick.index
+
+
+def visible_selection(scene):
+    """Yield only live, selected, visible geometry for the overlay adapter."""
+    if _native is None:
+        return
     state = runtime(scene)
     if state.document is None:
-        return None
-    origin, direction = Vector(origin), Vector(direction).normalized()
-    best = None
-    distance = math.inf
-    for host in hosts(scene, state.document.id):
-        if host.hide_get() or host.hide_viewport:
+        return
+    by_body = {host.get(BODY): host for host in hosts(scene, state.document.id)}
+    for pick in state.selected_picks:
+        host = by_body.get(pick.body_id)
+        if host is None or not host.select_get() or not host.visible_get():
             continue
         try:
-            packet = current_packet(scene, host)
+            packet = current_packet(scene, host, pick.token)
+            from .selection import _rigid
+            _rigid(host)
         except ValueError:
             continue
         display = display_for(scene, host)
-        if display.hide_get() or display.hide_viewport:
+        if display is None or not display.visible_get():
             continue
-        inverse = host.matrix_world.inverted_safe()
-        local_origin = inverse @ origin
-        local_direction = (inverse.to_3x3() @ direction).normalized()
-        point, _normal, triangle, _distance = packet.bvh.ray_cast(local_origin, local_direction)
-        if point is not None:
-            hit_distance = ((host.matrix_world @ point) - origin).length
-            if hit_distance < distance:
-                distance = hit_distance
-                best = host, resolve(scene, host, "FACE", int(packet.arrays["triangle_faces"][triangle]), packet.token)
-    if best and depsgraph is not None:
-        hit, point, _normal, _index, obj, _matrix = scene.ray_cast(depsgraph, origin, direction)
-        if hit and host_for(obj.original) != best[0] and (point - origin).length < distance - 1e-7:
-            return None
-    return best
+        yield host, pick, packet
+
+
+def measure_pick(scene, host, pick):
+    from .selection import _rigid
+    _rigid(host)
+    if pick.body_id != host.get(BODY) or pick.document_id != host.get(DOC):
+        raise ValueError("CAD selection belongs to another Solid")
+    current_packet(scene, host, pick.token)
+    state = runtime(scene)
+    return state.evaluator.measure_element(state.document, pick.body_id,
+                                          _native.TopologyElement(getattr(_native.TopologyKind, pick.kind), pick.index))
+
+
+def current_measure(scene, host):
+    state = runtime(scene)
+    pick, measure = state.last_pick, state.last_measure
+    if pick is None or measure is None or pick.body_id != host.get(BODY) or not host.select_get():
+        return None
+    try:
+        current_packet(scene, host, pick.token)
+        from .selection import _rigid
+        _rigid(host)
+    except ValueError:
+        return None
+    if measure.element.kind.name != pick.kind or measure.element.index != pick.index:
+        return None
+    return measure
+
+
+def apply_pick(context, host, pick, extend=False):
+    """Select CAD subelements without altering design definitions or display."""
+    from .capabilities import require_capability
+    require_capability([host], "pick")
+    scene = context.scene
+    measure = measure_pick(scene, host, pick)
+    state = runtime(scene)
+    previous = [item for _host, item, _packet in visible_selection(scene)]
+    key = pick_key(pick)
+    if not extend:
+        selected = [pick]
+        for obj in context.selected_objects:
+            obj.select_set(False)
+    elif any(pick_key(item) == key for item in previous):
+        selected = [item for item in previous if pick_key(item) != key]
+    else:
+        selected = previous + [pick]
+    state.selected_picks = selected
+    host.select_set(any(item.body_id == pick.body_id for item in selected))
+    context.view_layer.objects.active = host
+    if any(pick_key(item) == key for item in selected):
+        state.last_pick, state.last_measure = pick, measure
+    else:
+        remaining = [item for item in selected if item.body_id == pick.body_id]
+        state.last_pick = remaining[-1] if remaining else None
+        state.last_measure = measure_pick(scene, host, state.last_pick) if state.last_pick else None
+    state.reference_error = ""
+    if state.last_pick:
+        try:
+            persistent_target(scene, host, state.last_pick)
+        except ValueError as error:
+            state.reference_error = str(error)
+    for area in context.screen.areas if context.screen else ():
+        if area.type == "VIEW_3D":
+            area.tag_redraw()
 
 
 @persistent

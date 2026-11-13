@@ -11,7 +11,7 @@ import zipfile
 
 import bpy
 from bpy_extras import view3d_utils
-from mathutils import Quaternion, Vector
+from mathutils import Euler, Quaternion, Vector
 
 bpy.context.preferences.view.show_splash = False
 
@@ -24,7 +24,7 @@ with zipfile.ZipFile(options.addon_zip) as archive:
     archive.extractall(temporary.name)
 sys.path.insert(0, temporary.name)
 addon = importlib.import_module("blendercad")
-from blendercad import capabilities, presentation as p
+from blendercad import capabilities, highlight, presentation as p
 
 capability_calls = []
 original_require = capabilities.require_capability
@@ -43,6 +43,20 @@ host_id = None
 area = None
 region = None
 cursor = (500, 450)
+overlay_before = 0
+
+
+def click_point(point):
+    location = view3d_utils.location_3d_to_region_2d(region, area.spaces.active.region_3d, Vector(point))
+    assert location is not None
+    event("LEFTMOUSE", x=int(region.x + location.x), y=int(region.y + location.y))
+
+
+def verify_overlay():
+    with bpy.context.temp_override(area=area, region=region):
+        bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=1)
+    assert not highlight.last_error, highlight.last_error
+    assert highlight.draw_count > overlay_before, "Selected CAD topology did not reach the GPU overlay handler"
 
 
 def event(kind, **values):
@@ -57,7 +71,7 @@ def event(kind, **values):
 
 
 def tick():
-    global step, baseline, host_id, area, region
+    global step, baseline, host_id, area, region, overlay_before
     try:
         scene = bpy.context.scene
         if step == 0:
@@ -81,12 +95,14 @@ def tick():
             bpy.context.view_layer.objects.active = None
             bpy.ops.ed.undo_push(message="Initial CAD Solid")
         elif step == 1:
-            location = view3d_utils.location_3d_to_region_2d(region, area.spaces.active.region_3d, Vector((0.015, 0.01, 0.005)))
-            event("LEFTMOUSE", x=int(region.x + location.x), y=int(region.y + location.y))
+            overlay_before = highlight.draw_count
+            click_point((0.015, 0.01, 0.005))
         elif step == 2:
             assert bpy.context.active_object is not None, "Click did not activate the Solid host"
             assert bpy.context.active_object.get(p.BODY) == host_id and bpy.context.active_object.type == "EMPTY"
             assert p.runtime(scene).last_pick is not None, "Body click did not retain the CAD face pick"
+            assert abs(p.current_measure(scene, bpy.context.active_object).area_mm2 - 600) < 1e-6
+            verify_overlay()
             with bpy.context.temp_override(area=area, region=region):
                 assert bpy.ops.blendercad.save_reference(name="UI face reference") == {"FINISHED"}
             assert len(p.read_document(scene).references) == 1
@@ -137,7 +153,42 @@ def tick():
             assert bpy.context.mode == "OBJECT" and scene.blendercad_document_snapshot == baseline
             event("ESC")
         elif step == 14:
-            (options.output_dir / "result.json").write_text(json.dumps({"passed": True, "capability_calls": capability_calls}))
+            scene.blendercad_selection_mode = "EDGE"
+            overlay_before = highlight.draw_count
+            click_point((0.015, 0, 0.005))
+        elif step == 15:
+            assert p.runtime(scene).last_pick.kind == "EDGE", "Edge-mode click did not select a CAD edge"
+            assert abs(p.current_measure(scene, bpy.context.active_object).length_mm - 30) < 1e-6
+            verify_overlay()
+            with bpy.context.temp_override(area=area, region=region):
+                assert bpy.ops.blendercad.save_reference(name="UI edge reference") == {"FINISHED"}
+            assert p.read_document(scene).references[-1].target.kind == addon._native.TopologyKind.EDGE
+            scene.blendercad_selection_mode = "VERTEX"
+            overlay_before = highlight.draw_count
+            click_point((0, 0, 0.005))
+        elif step == 16:
+            assert p.runtime(scene).last_pick.kind == "VERTEX", "Vertex-mode click did not select a CAD vertex"
+            point = p.current_measure(scene, bpy.context.active_object).center_mm
+            assert abs(point.x) < 1e-6 and abs(point.y) < 1e-6 and abs(point.z - 5) < 1e-6
+            verify_overlay()
+            with bpy.context.temp_override(area=area, region=region):
+                assert bpy.ops.blendercad.save_reference(name="UI vertex reference") == {"FINISHED"}
+            assert p.read_document(scene).references[-1].target.kind == addon._native.TopologyKind.VERTEX
+            view = area.spaces.active.region_3d
+            view.view_perspective = "PERSP"
+            view.view_rotation = Euler((0.5, 0.3, 0)).to_quaternion()
+            scene.blendercad_selection_mode = "EDGE"
+        elif step == 17:
+            overlay_before = highlight.draw_count
+            click_point((0.015, 0, 0.005))
+        elif step == 18:
+            pick = p.runtime(scene).last_pick
+            assert pick is not None and pick.kind == "EDGE"
+            assert abs(pick.point_mm[1]) < 1e-5 and abs(pick.point_mm[2] - 5) < 1e-5
+            assert abs(p.current_measure(scene, bpy.context.active_object).length_mm - 30) < 1e-6
+            verify_overlay()
+            (options.output_dir / "result.json").write_text(json.dumps({"passed": True, "capability_calls": capability_calls,
+                "cad_selection_kinds": ["FACE", "EDGE", "VERTEX"], "overlay_draw_count": highlight.draw_count}))
             bpy.ops.wm.quit_blender()
             return None
         step += 1

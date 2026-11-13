@@ -10,6 +10,7 @@
 - Kernel validity, analytic volume in mm³, and maximum vertex/edge/face tolerance queries.
 - Tessellation with independently specified absolute linear deflection in mm and angular deflection in radians.
 - STEP solid import and export using millimetres as the internal length unit.
+- Trimmed B-rep face rays, bounded closest points, area/length/centroid queries and supported analytic radii; see [selection and queries](selection-and-queries.md).
 
 The adapter rejects null, invalid, and non-solid results before allocating a handle. Each adapter accepts a configurable geometric tolerance budget, defaulting to **0.001 mm**. Results with OCCT topology tolerances exceeding that budget are rejected; the budget is never silently increased. This check is not a general proof of geometric accuracy, nor a substitute for exchange-deviation validation. Display deflection is separate and does not change modeling tolerance.
 
@@ -44,4 +45,4 @@ ctest --test-dir build -R native_geometry --output-on-failure
 
 The `check` target builds the addon package and runs CTest. Native checks use the target Blender and its bundled NumPy. CTest sets `ALSOFT_DRIVERS=null` to avoid an audio-shutdown stall observed in the sandbox, unrelated to the CAD checks.
 
-The checks cover analytical volumes at 0.01–1000 mm scales, rotated/translated planes, mesh orientation and topology mappings, curved tessellation refinement, subtraction, STEP round trips, configured tolerance rejection, handle isolation/lifetimes, document snapshot round trips and malformed UUID rejection. The packaged-addon Blender check covers native import, registration, scene save/reopen, registration cycling, and protection against overwriting existing/future-schema documents. These checks do not establish interactive selection, undo synchronization, constrained sketching, feature history or bracket acceptance.
+The focused native geometry checks cover analytical volumes at 0.01–1000 mm scales, rotated/translated planes, mesh orientation and topology mappings, curved tessellation refinement, subtraction, STEP round trips, tolerance rejection and handle isolation. Separate query/guard checks cover true B-rep hits and measures, trimmed regions and currentness. Packaged Blender and event tests cover selection, persistence and undo at their documented integration boundaries. None of these alone establishes the complete interactive bracket workflow.
