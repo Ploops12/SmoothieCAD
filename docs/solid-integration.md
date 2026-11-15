@@ -25,7 +25,8 @@ and **Convert to Regular Mesh**. A depth may be a literal millimetre value or a
 named length parameter, which can itself have a unit-aware arithmetic
 [expression definition](parameter-expressions.md). The [interactive editor](interactive-sketches.md)
 adds viewport drawing/constraints/dragging and sketch-based extrusion/cuts;
-associative face-based modelling and fillets remain pending.
+[constant-radius fillets and history controls](fillets-and-history.md) add persistent
+edge inputs and explicit repair. Associative face-based modelling remains pending.
 Rectangle width/height and existing sketch dimensions can now bind to length
 parameters through the [dimension controls](sketch-dimensions.md); editing an
 earlier profile recomputes its affected feature chain without rewriting its IDs.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "blendercad/document_id.hpp"
+#include "blendercad/reference.hpp"
 
 #include <optional>
 #include <string>
@@ -26,7 +27,15 @@ struct SubtractiveExtrusionFeature final {
     friend bool operator==(const SubtractiveExtrusionFeature&, const SubtractiveExtrusionFeature&) = default;
 };
 
-using FeatureParameters = std::variant<ExtrusionFeature, SubtractiveExtrusionFeature>;
+struct FilletFeature final {
+    DocumentId input;
+    DepthInput radius{1.0};
+    // Inline persistent intent, not bookmark identities or saved edge ordinals.
+    std::vector<PersistentReference> edges;
+    friend bool operator==(const FilletFeature&, const FilletFeature&) = default;
+};
+
+using FeatureParameters = std::variant<ExtrusionFeature, SubtractiveExtrusionFeature, FilletFeature>;
 
 struct FeatureDefinition final {
     DocumentId id;
@@ -38,8 +47,10 @@ struct FeatureDefinition final {
     friend bool operator==(const FeatureDefinition&, const FeatureDefinition&) = default;
 };
 
-[[nodiscard]] const DocumentId& feature_sketch(const FeatureDefinition& feature);
+[[nodiscard]] std::optional<DocumentId> feature_sketch(const FeatureDefinition& feature);
 [[nodiscard]] const DepthInput& feature_depth(const FeatureDefinition& feature);
+[[nodiscard]] const DepthInput& feature_length(const FeatureDefinition& feature);
+[[nodiscard]] const DepthInput& feature_radius(const FeatureDefinition& feature);
 [[nodiscard]] std::optional<DocumentId> feature_input(const FeatureDefinition& feature);
 [[nodiscard]] std::string feature_type(const FeatureDefinition& feature);
 [[nodiscard]] std::vector<DocumentId> feature_dependencies(const FeatureDefinition& feature);

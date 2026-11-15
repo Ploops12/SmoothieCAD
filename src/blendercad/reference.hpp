@@ -4,6 +4,7 @@
 #include "blendercad/topology.hpp"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace blendercad {
@@ -40,5 +41,10 @@ struct ReferenceResolution final {
 // Strict canonical key validation is independent of evaluated kernel objects.
 // Unknown well-formed construction keys remain repairable saved intent.
 void validate_reference(const PersistentReference& reference);
+
+// Clone known construction/provenance identities, preserving opaque unknown
+// keys as repairable intent. Numeric topology ordinals are never substituted.
+[[nodiscard]] PersistentReference remap_reference(const PersistentReference& reference,
+    const std::vector<std::pair<DocumentId, DocumentId>>& identities);
 
 } // namespace blendercad

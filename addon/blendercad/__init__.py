@@ -98,11 +98,41 @@ def _classes():
                 edit.name = parameter.name
                 if parameter.expression is not None:
                     self.layout.label(text=f"= {parameter.expression}")
-            for feature in document.features:
-                row = self.layout.row(align=True)
-                row.label(text=feature.name)
-                operator = row.operator("blendercad.set_feature_depth", text="Depth")
+            history = self.layout.box()
+            row = history.row(align=True)
+            row.label(text="Feature History")
+            if document.rollback_before is not None:
+                row.operator("blendercad.rollback", text="Resume Full History")
+            reports = {item.feature_id: item for item in state.report.features} if state.report and state.serialized == serialized else {}
+            for index, feature in enumerate(document.features):
+                item = history.box()
+                report = reports.get(feature.id)
+                status = report.state.name.replace("_", " ").title() if report else "Needs recompute"
+                item.label(text=f"{index + 1}. {feature.name} · {status}")
+                row = item.row(align=True)
+                if feature.type == "fillet":
+                    operator = row.operator("blendercad.set_fillet_radius", text="Radius")
+                    operator.feature_id = feature.id
+                    if document.rollback_before == feature.id:
+                        operator = row.operator("blendercad.repair_fillet_edges", text="Repair and Resume")
+                        operator.feature_id = feature.id
+                else:
+                    operator = row.operator("blendercad.set_feature_depth", text="Depth")
+                    operator.feature_id = feature.id
+                operator = row.operator("blendercad.suppress_feature", text="Unsuppress" if feature.suppressed else "Suppress")
+                operator.feature_id, operator.suppressed = feature.id, not feature.suppressed
+                operator = row.operator("blendercad.rollback", text="Edit Inputs" if feature.type == "fillet" else "Before")
                 operator.feature_id = feature.id
+                row = item.row(align=True)
+                for offset, text in ((-1, "Earlier"), (1, "Later")):
+                    cell = row.row(align=True)
+                    cell.enabled = 0 <= index + offset < len(document.features)
+                    operator = cell.operator("blendercad.move_feature", text=text)
+                    operator.feature_id, operator.offset = feature.id, offset
+                operator = row.operator("blendercad.delete_feature", text="Delete")
+                operator.feature_id = feature.id
+                if report and report.diagnostic:
+                    item.label(text=report.diagnostic, icon="ERROR")
             sketch_box = self.layout.box()
             sketch_box.label(text="Sketches")
             row = sketch_box.row(align=True)
@@ -141,7 +171,7 @@ def _classes():
                     seen = set()
                     reports = {item.feature_id: item for item in state.report.features} if state.report and state.serialized == serialized else {}
                     for feature in document.features:
-                        if feature.body_id != host.get(presentation.BODY) or feature.sketch_id in seen:
+                        if feature.sketch_id is None or feature.body_id != host.get(presentation.BODY) or feature.sketch_id in seen:
                             continue
                         seen.add(feature.sketch_id)
                         sketch = next(item for item in document.sketches if item.id == feature.sketch_id)
@@ -190,6 +220,7 @@ def _classes():
                 if highlight.last_error:
                     box.label(text="Selection overlay unavailable", icon="ERROR")
                 box.operator("blendercad.duplicate_solid")
+                box.operator("blendercad.fillet")
                 box.operator("blendercad.save_reference")
                 box.operator("blendercad.frame_solid")
                 box.operator("blendercad.delete_solid")

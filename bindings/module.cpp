@@ -65,6 +65,22 @@ PYBIND11_MODULE(_native, module) {
         .def("extrude_polygon", &blendercad::GeometryAdapter::extrude_polygon)
         .def("extrude_circle", &blendercad::GeometryAdapter::extrude_circle)
         .def("subtract", &blendercad::GeometryAdapter::subtract)
+        .def("fillet", [](blendercad::GeometryAdapter& geometry, blendercad::ShapeHandle shape,
+                          const py::iterable& raw_edges, const py::object& radius) {
+            std::vector<std::uint32_t> edges;
+            for (const auto& edge : raw_edges) {
+                if (PyBool_Check(edge.ptr()) || !PyIndex_Check(edge.ptr())) {
+                    throw py::value_error("fillet edge indices must be integers, not booleans or fractional values");
+                }
+                const auto index = py::reinterpret_steal<py::object>(PyNumber_Index(edge.ptr()));
+                if (!index) throw py::error_already_set();
+                edges.push_back(py::cast<std::uint32_t>(index));
+            }
+            if (PyBool_Check(radius.ptr()) || (!PyFloat_Check(radius.ptr()) && !PyLong_Check(radius.ptr()))) {
+                throw py::value_error("fillet radius must be a finite number, not a boolean");
+            }
+            return geometry.fillet(shape, edges, py::cast<double>(radius));
+        }, py::arg("shape"), py::arg("edge_indices"), py::arg("radius_mm"))
         .def("write_step", &blendercad::GeometryAdapter::write_step)
         .def("read_step", &blendercad::GeometryAdapter::read_step)
         .def("tessellate", [](const blendercad::GeometryAdapter& geometry, blendercad::ShapeHandle shape,

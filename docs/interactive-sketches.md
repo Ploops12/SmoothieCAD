@@ -153,13 +153,14 @@ circle per sketch. Open chains, multiple regions and mixed line/arc loops do not
 silently become an arbitrary chosen face. Use separate closed sketches/cuts for
 separate hole profiles until multiple-region/arc evaluation is implemented.
 Face-attached associative planes, a full sketch toolbar/gizmo system, per-stroke
-undo, solid feature previews, additive unions and constant-radius fillets remain
-follow-up work. The complete bracket acceptance gate is not claimed here.
+undo, solid feature previews and additive unions remain follow-up work.
+[Constant-radius fillets](fillets-and-history.md) now consume selected persistent
+CAD edges after extrusion/cuts. The complete bracket acceptance gate is not claimed here.
 
 ## Build and verification
 
 No schema or supplemental dependency change is required; this uses current
-schema-6 sketch definitions. CMake packages all editor modules automatically.
+sketch definitions introduced in schema 6 (retained in current schema 7). CMake packages all editor modules automatically.
 
 ```sh
 cmake --build build --target check -j2

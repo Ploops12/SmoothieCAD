@@ -7,6 +7,14 @@ namespace py = pybind11;
 using namespace blendercad;
 
 void bind_reference(py::module_& module) {
+    module.def("remap_reference", [](const PersistentReference& reference, const py::dict& mappings) {
+        std::vector<std::pair<DocumentId, DocumentId>> identities;
+        for (const auto& item : mappings) {
+            identities.emplace_back(DocumentId::parse(py::cast<std::string>(item.first)),
+                                    DocumentId::parse(py::cast<std::string>(item.second)));
+        }
+        return remap_reference(reference, identities);
+    }, py::arg("reference"), py::arg("identities"));
     py::class_<ReferenceAnchor>(module, "ReferenceAnchor")
         .def(py::init([](const std::string& feature, std::string key) { return ReferenceAnchor{DocumentId::parse(feature), std::move(key)}; }))
         .def_property_readonly("feature_id", [](const ReferenceAnchor& anchor) { return anchor.feature.to_string(); })

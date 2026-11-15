@@ -2,8 +2,8 @@
 
 ## Implemented scope and ownership
 
-Saved references now identify faces, edges and vertices of evaluated extrusion
-and subtractive-extrusion bodies using stable feature/sketch identities and
+Saved references now identify faces, edges and vertices of evaluated extrusion,
+subtractive-extrusion and fillet bodies using stable feature/sketch identities and
 OCCT construction/change history. They do not save transient topology indices,
 display tokens, process handles or geometric nearest-neighbor guesses.
 
@@ -20,9 +20,9 @@ The layers remain separate:
 - Blender picks are disposable; commands translate a current picked element to
   a persistent target before committing its definition.
 
-These named references are currently document-level bookmarks and the API for
-subsequent feature consumers. Fillets and face-attached sketches do not yet
-consume them. A feature consuming a saved reference must require `RESOLVED`
+Named references are document-level bookmarks. Fillets consume inline persistent
+edge targets using the same representation; face-attached sketches remain pending.
+A feature consuming a persistent reference must require `RESOLVED`
 and propagate unavailable/repair diagnostics, never select the first candidate.
 
 ## Construction and operation provenance
@@ -55,6 +55,12 @@ Tessellation explicitly maps each original element into its meshed copy,
 preserving authoritative element numbering and accumulated face orientation.
 Copy-map orientation cannot be assumed; signed triangle-volume checks cover
 the regression where a copied reversed cap produced incorrect winding.
+
+Fillet history additionally records exact face-boundary incidence separately
+from direct OCCT `Generated` results. Uniquely distinguishable new boundaries
+receive `boundary:` keys; incomplete or indistinguishable origins remain
+ambiguous. See [fillet provenance](fillets-and-history.md) for the adapter
+contract and cloning rules.
 
 ## Persistence and queries
 
@@ -119,8 +125,8 @@ proven deleted remain ambiguous rather than selecting similar geometry.
 Removing a creator feature/sketch rejects dependent saved references by default.
 Explicit cascade removes them in the same atomic document edit. Suppression and
 rollback retain definitions. Independent-body duplication leaves document-level
-bookmarks on their original body; future reference-consuming features will need
-an explicit input-remapping clone contract. Body conversion/deletion includes
+bookmarks on their original body; fillet inline targets and nested provenance
+keys are remapped through the complete cloned UUID map. Body conversion/deletion includes
 bookmarks whose creators are removed.
 
 ## Blender workflow
@@ -135,8 +141,9 @@ Every display publication clears the picked-element token, even when geometry
 was cached. A stale pick or last-good failed display cannot create/repair a
 reference. Mouse selection and native capture now support all three topology
 kinds; see [selection and queries](selection-and-queries.md) for highlighting,
-trimmed closest points, exact face rays and inspector values. Reference-consuming
-modelling features and complete sketch/gizmo interaction remain follow-up work.
+trimmed closest points, exact face rays and inspector values. Fillet edge consumers and explicit repair are described in
+[fillets and history](fillets-and-history.md); complete sketch/gizmo interaction
+remains follow-up work.
 
 ## Verification
 

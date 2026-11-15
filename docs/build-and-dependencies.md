@@ -11,13 +11,14 @@ cmake --build build --target check -j2
 ```
 
 On Linux with the optional host tool `xvfb-run` installed, CMake additionally
-provides `cmake --build build --target check_solid_ui` and
-`cmake --build build --target check_sketch_ui`. These isolate Blender windows,
+provides `cmake --build build --target check_solid_ui`,
+`cmake --build build --target check_sketch_ui`, and
+`cmake --build build --target check_fillet_ui`. These isolate Blender windows,
 configuration and generated files under the build tree and check actual
-event-queue routing/undo, sketch drawing/constraints and preview cancellation.
+event-queue routing/undo, sketch drawing/constraints, fillet selection/dialogs/history and cancellation.
 They are separate from the headless `check` target; see
 [Solid integration](solid-integration.md) and [interactive sketches](interactive-sketches.md)
-for coverage and limits. Normal `clean` removes both targets' logs, screenshots
+for coverage and limits. Normal `clean` removes these targets' logs, screenshots
 and temporary files.
 
 The first configure acquires pinned build dependencies. Subsequent builds reuse the build-local cache. Matching installed OCCT 7.9.3 and pybind11 3.1.0 packages are preferred by default; if absent, CMake fetches and builds their pinned source revisions. `-DBLENDERCAD_USE_SYSTEM_DEPENDENCIES=OFF` forces those source paths. The solver's Eigen/Boost header dependencies are always acquired at the recorded versions, and PlaneGCS itself is vendored at a fixed upstream revision. `cmake/Dependencies.cmake` is the dependency lock/build entry point. It verifies archive hashes or pinned Git object identities; `cmake/PlaneGCS.cmake` checks the vendored source hashes.
@@ -55,10 +56,16 @@ cmake -DBLENDERCAD_BUILD_DIR=build -DMODE=all -P cmake/Clean.cmake
 
 Full cleanup requires an out-of-source build marked by this project and refuses the source tree or an ancestor containing it. Dependency cleanup removes only `_deps/` and legacy `dependencies/` under that build tree; it never follows a custom FetchContent cache location outside the build directory. Source, vendored dependency files and Git state are not cleanup targets.
 
+Filleting links the existing OCCT `TKFillet` toolkit; both installed-library and
+source-build dependency lists include it. This does not introduce another library
+project or a runtime download. The source-build fillet path has not yet received
+the current feature acceptance suite.
+
 The Linux dependency-lifecycle verification exercised matching installed packages and forced CMake source builds of OCCT/pybind11; both passed the four then-existing CTest groups. A normal `clean` followed by `check` also passed without reacquiring cached sources. The actual dependency-purge target and full-tree script were exercised in a disposable project build, including preservation of external source inputs. The current `check` target additionally covers document/sketch/feature snapshots and feature evaluation/history. These checks do not establish portability to other platforms or final runtime-library packaging.
 
 ## Layer ownership
 
-The C++ document core owns stable identities, revisions, tolerance, named unit-tagged values and persistent sketch/feature definitions. The Python binding translates versioned mappings; the addon serializes these definitions into a hidden Blender scene property. Unsupported future snapshots are rejected and preserved. The addon exposes initial numeric rectangle/depth commands and managed Solid presentation, not the complete modelling/history UI. See [document snapshots](document-snapshots.md) for schema and mutation contracts and [Solid integration](solid-integration.md) for publication, commands and undo.
+The C++ document core owns stable identities, revisions, tolerance, named unit-tagged values and persistent sketch/feature definitions. The Python binding translates versioned mappings; the addon serializes these definitions into a hidden Blender scene property. Unsupported future snapshots are rejected and preserved. The addon exposes initial numeric rectangle/depth commands and managed Solid presentation, not the complete bracket workflow. Fillet and history controls are described in
+[fillets and history](fillets-and-history.md). See [document snapshots](document-snapshots.md) for schema and mutation contracts and [Solid integration](solid-integration.md) for publication, commands and undo.
 
 The OCCT adapter owns transient evaluated shapes and exposes controlled queries, never kernel pointers. A separate feature evaluator owns cached results, current-result guards and explicitly stale displays. [CAD measurements and precise picks](selection-and-queries.md) query evaluated B-rep geometry, not display triangles. Display indices are translated through construction/Boolean history into [persistent anchors and repair states](persistent-references.md). The sketch adapter owns PlaneGCS objects and maps diagnostics to persistent constraints. Solver pointers/caches are not document data. The addon publishes managed meshes, selection overlays and disposable caches reconstructed after load/undo. Rendering, reference/selection commands, query guards and capability checks run through CMake; check also builds the native reference-tracker test executable.

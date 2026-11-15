@@ -33,7 +33,7 @@ Structural validity is different from solver feasibility. Well-formed redundant/
 
 Sketch edits validate a candidate collection before replacing document storage. Rejected edits leave both definitions and revision unchanged. Actual accepted changes advance the document's uint64 content revision once; no-op replacements/renames and unchanged numeric edits do not. Revision exhaustion rejects changes before mutation instead of wrapping and permitting stale cache keys. Native document mutation is not a thread-safe or Blender-undo API; a command/evaluation layer must own transactions and revision-aware publication.
 
-## Schema 6 and migration
+## Schema 7 and migration
 
 The binding maps typed core records to JSON-compatible values; Blender's storage adapter uses Python's standard JSON encoder. This avoids a second JSON dependency in geometry/core code and keeps scene storage replaceable. All supported fields are required, unknown fields are rejected, and numeric snapshot fields reject booleans, nonfinite values and type coercions. Malformed snapshots raise `ValueError`.
 
@@ -45,10 +45,12 @@ Schema 5 adds [parameter expression definitions](parameter-expressions.md): a pa
 
 Schema 6 adds [sketch dimension bindings](sketch-dimensions.md). Version-2 sketches may replace a dimensional constraint's `value` with `parameter`; both fields together are invalid. Numeric-only sketches continue to emit version 1. The resolved numeric constraints and solved geometry are copies, not saved caches.
 
-Schemas 1/2/3/4/5 migrate in memory to schema 6, preserving their existing definitions, identities, tolerance and revision. Missing feature history initializes empty with no rollback; missing references initialize empty. Loading alone does **not** rewrite the scene string; a later explicit committed edit can save the upgraded snapshot. Unsupported document, sketch, feature or reference versions fail closed and leave the original scene property intact. Invalid legacy records likewise remain stored for diagnosis rather than being silently repaired or discarded.
+Schema 7 adds [constant-radius fillet records](fillets-and-history.md) with persistent inline edge targets and a literal/parameter radius. Extrusion/cut and sketch formats remain unchanged.
+
+Schemas 1/2/3/4/5/6 migrate in memory to schema 7, preserving their existing definitions, identities, tolerance and revision. Missing feature history initializes empty with no rollback; missing references initialize empty. Loading alone does **not** rewrite the scene string; a later explicit committed edit can save the upgraded snapshot. Unsupported document, sketch, feature or reference versions fail closed and leave the original scene property intact. Invalid legacy records likewise remain stored for diagnosis rather than being silently repaired or discarded.
 
 ## Verification and remaining work
 
 `cmake --build build --target check` includes document snapshot checks in Blender and a packaged-addon save/reopen check. Coverage includes all constraint/target encodings, IDs and arbitrary planes, feature records/dependencies/depth inputs, schema migration/future rejection, malformed fields/references/numbers, copy lifetimes, no-op revisions, atomic rejection and revision overflow. The Blender check reopens a constrained circle and its feature-driven extrusion on a rotated/translated plane, rebuilds geometry with a fresh evaluator, and preserves legacy and unsupported-future scene payloads.
 
-Native feature history, named construction references, parameter-bound dimensions and dependency-checked sketch/feature/reference deletion now exist, but this is not a complete persistence/history UI workflow. The addon duplicates body definitions and reconstructs native state/managed meshes/reference resolution after load and undo/redo; see [Solid integration](solid-integration.md). Reference-consuming features, history UI and full interactive sketch editing remain incomplete.
+Native feature history, named construction references, parameter-bound dimensions and dependency-checked sketch/feature/reference deletion now exist, but this is not a complete persistence/history UI workflow. The addon duplicates body definitions and reconstructs native state/managed meshes/reference resolution after load and undo/redo; see [Solid integration](solid-integration.md). Constant-radius fillets consume persistent edge targets; the sidebar provides history controls and explicit fillet repair. Initial interactive sketch editing exists; full bracket acceptance remains pending.

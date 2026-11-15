@@ -198,31 +198,60 @@ DepthInput parse_depth_argument(const py::handle& value, const std::string& cont
     invalid(context + " must be a number or parameter name");
 }
 
-DepthInput parse_depth_snapshot(const py::handle& value) {
-    const auto depth = as_dict(value, "feature depth");
+DepthInput parse_depth_snapshot(const py::handle& value, const char* context = "feature depth") {
+    const auto depth = as_dict(value, context);
     if (depth.size() == 1 && depth.contains("value_mm")) {
-        return as_number(depth["value_mm"], "feature depth value_mm");
+        return as_number(depth["value_mm"], context);
     }
     if (depth.size() == 1 && depth.contains("parameter")) {
-        return as_string(depth["parameter"], "feature depth parameter");
+        return as_string(depth["parameter"], context);
     }
-    invalid("feature depth must contain exactly one of value_mm or parameter");
+    invalid(std::string(context) + " must contain exactly one of value_mm or parameter");
 }
 
-FeatureDefinition parse_feature_snapshot(const py::handle& value) {
+PersistentReference parse_target_fields(const py::dict& reference) {
+    const auto kind_name = as_string(reference["kind"], "reference kind");
+    TopologyKind kind;
+    if (kind_name == "face") kind = TopologyKind::Face;
+    else if (kind_name == "edge") kind = TopologyKind::Edge;
+    else if (kind_name == "vertex") kind = TopologyKind::Vertex;
+    else invalid("unsupported reference topology kind: " + kind_name);
+    return {DocumentId::parse(as_string(reference["body"], "reference body id")), kind,
+            {DocumentId::parse(as_string(reference["feature"], "reference feature id")),
+             as_string(reference["key"], "reference key")}};
+}
+
+FeatureDefinition parse_feature_snapshot(const py::handle& value, bool allow_fillet) {
     const auto feature = as_dict(value, "feature");
-    require_fields(feature, {"id", "name", "version", "type", "body", "sketch",
-                             "input", "depth", "suppressed"}, "feature");
+    const auto type = as_string(required(feature, "type", "feature"), "feature type");
+    if (type == "fillet") {
+        if (!allow_fillet) invalid("fillet features require document schema 7");
+        require_fields(feature, {"id", "name", "version", "type", "body", "input", "radius", "edges", "suppressed"}, "fillet feature");
+    } else {
+        require_fields(feature, {"id", "name", "version", "type", "body", "sketch",
+                                 "input", "depth", "suppressed"}, "feature");
+    }
     const auto version = as_version(feature["version"], "feature version");
     if (version != 1) invalid("unsupported feature definition version");
     const auto name = as_string(feature["name"], "feature name");
-    const auto type = as_string(feature["type"], "feature type");
     const auto id = DocumentId::parse(as_string(feature["id"], "feature id"));
     const auto body = DocumentId::parse(as_string(feature["body"], "feature body id"));
-    const auto sketch = DocumentId::parse(as_string(feature["sketch"], "feature sketch id"));
-    auto depth = parse_depth_snapshot(feature["depth"]);
     if (!PyBool_Check(feature["suppressed"].ptr())) invalid("feature suppressed field must be a boolean");
     const bool suppressed = py::cast<bool>(feature["suppressed"]);
+
+    if (type == "fillet") {
+        const auto input = DocumentId::parse(as_string(feature["input"], "fillet input id"));
+        auto radius = parse_depth_snapshot(feature["radius"], "fillet radius");
+        std::vector<PersistentReference> edges;
+        for (const auto& raw_edge : as_list(feature["edges"], "fillet edges")) {
+            const auto edge = as_dict(raw_edge, "fillet edge target");
+            require_fields(edge, {"body", "kind", "feature", "key"}, "fillet edge target");
+            edges.push_back(parse_target_fields(edge));
+        }
+        return {id, name, version, body, FilletFeature{input, std::move(radius), std::move(edges)}, suppressed};
+    }
+    const auto sketch = DocumentId::parse(as_string(feature["sketch"], "feature sketch id"));
+    auto depth = parse_depth_snapshot(feature["depth"]);
 
     if (type == "extrusion") {
         if (!feature["input"].is_none()) invalid("extrusion input must be null");
@@ -241,35 +270,31 @@ ReferenceDefinition parse_reference_snapshot(const py::handle& value) {
     const auto reference = as_dict(value, "reference");
     require_fields(reference, {"id", "name", "version", "body", "kind", "feature", "key"}, "reference");
     if (as_version(reference["version"], "reference version") != 1) invalid("unsupported reference definition version");
-    const auto kind_name = as_string(reference["kind"], "reference kind");
-    TopologyKind kind;
-    if (kind_name == "face") kind = TopologyKind::Face;
-    else if (kind_name == "edge") kind = TopologyKind::Edge;
-    else if (kind_name == "vertex") kind = TopologyKind::Vertex;
-    else invalid("unsupported reference topology kind: " + kind_name);
     return {DocumentId::parse(as_string(reference["id"], "reference id")),
-            as_string(reference["name"], "reference name"),
-            {DocumentId::parse(as_string(reference["body"], "reference body id")), kind,
-             {DocumentId::parse(as_string(reference["feature"], "reference feature id")),
-              as_string(reference["key"], "reference key")}}};
+            as_string(reference["name"], "reference name"), parse_target_fields(reference)};
 }
 
-py::dict reference_snapshot(const ReferenceDefinition& reference) {
+py::dict target_snapshot(const PersistentReference& target) {
     const char* kind;
-    switch (reference.target.kind) {
+    switch (target.kind) {
     case TopologyKind::Face: kind = "face"; break;
     case TopologyKind::Edge: kind = "edge"; break;
     case TopologyKind::Vertex: kind = "vertex"; break;
     default: invalid("invalid reference topology kind");
     }
     py::dict result;
+    result["body"] = target.body.to_string();
+    result["kind"] = kind;
+    result["feature"] = target.anchor.feature.to_string();
+    result["key"] = target.anchor.key;
+    return result;
+}
+
+py::dict reference_snapshot(const ReferenceDefinition& reference) {
+    auto result = target_snapshot(reference.target);
     result["id"] = reference.id.to_string();
     result["name"] = reference.name;
     result["version"] = 1;
-    result["body"] = reference.target.body.to_string();
-    result["kind"] = kind;
-    result["feature"] = reference.target.anchor.feature.to_string();
-    result["key"] = reference.target.anchor.key;
     return result;
 }
 
@@ -320,10 +345,17 @@ py::dict feature_snapshot(const FeatureDefinition& feature) {
     result["version"] = feature.version;
     result["type"] = feature_type(feature);
     result["body"] = feature.body.to_string();
-    result["sketch"] = feature_sketch(feature).to_string();
     if (const auto input = feature_input(feature)) result["input"] = input->to_string();
     else result["input"] = py::none();
-    result["depth"] = depth_snapshot(feature_depth(feature));
+    if (const auto* fillet = std::get_if<FilletFeature>(&feature.parameters)) {
+        result["radius"] = depth_snapshot(fillet->radius);
+        py::list edges;
+        for (const auto& edge : fillet->edges) edges.append(target_snapshot(edge));
+        result["edges"] = std::move(edges);
+    } else {
+        result["sketch"] = feature_sketch(feature)->to_string();
+        result["depth"] = depth_snapshot(feature_depth(feature));
+    }
     result["suppressed"] = feature.suppressed;
     return result;
 }
@@ -404,7 +436,7 @@ Document parse_snapshot(const py::object& raw) {
             require_fields(snapshot, {"schema_version", "document_id", "revision",
                                       "geometric_tolerance_mm", "parameters", "sketches",
                                       "features", "rollback_before"}, "schema 3 snapshot");
-        } else if (schema == 4 || schema == 5 || schema == Document::current_schema_version) {
+        } else if (schema == 4 || schema == 5 || schema == 6 || schema == Document::current_schema_version) {
             require_fields(snapshot, {"schema_version", "document_id", "revision",
                                       "geometric_tolerance_mm", "parameters", "sketches",
                                       "features", "rollback_before", "references"}, "document snapshot");
@@ -449,7 +481,7 @@ Document parse_snapshot(const py::object& raw) {
         std::optional<DocumentId> rollback_before;
         if (schema >= 3) {
             for (const auto& raw_feature : as_list(snapshot["features"], "features")) {
-                features.push_back(parse_feature_snapshot(raw_feature));
+                features.push_back(parse_feature_snapshot(raw_feature, schema >= 7));
             }
             if (!snapshot["rollback_before"].is_none()) {
                 rollback_before = DocumentId::parse(as_string(snapshot["rollback_before"],
@@ -516,15 +548,25 @@ void bind_document(py::module_& module) {
         .def_property_readonly("body_id", [](const FeatureDefinition& feature) {
             return feature.body.to_string();
         })
-        .def_property_readonly("sketch_id", [](const FeatureDefinition& feature) {
-            return feature_sketch(feature).to_string();
+        .def_property_readonly("sketch_id", [](const FeatureDefinition& feature) -> py::object {
+            if (const auto sketch = feature_sketch(feature)) return py::str(sketch->to_string());
+            return py::none();
         })
         .def_property_readonly("input_id", [](const FeatureDefinition& feature) -> py::object {
             if (const auto input = feature_input(feature)) return py::str(input->to_string());
             return py::none();
         })
-        .def_property_readonly("depth", [](const FeatureDefinition& feature) {
+        .def_property_readonly("depth", [](const FeatureDefinition& feature) -> py::object {
+            if (std::holds_alternative<FilletFeature>(feature.parameters)) return py::none();
             return depth_value(feature_depth(feature));
+        })
+        .def_property_readonly("radius", [](const FeatureDefinition& feature) -> py::object {
+            if (const auto* fillet = std::get_if<FilletFeature>(&feature.parameters)) return depth_value(fillet->radius);
+            return py::none();
+        })
+        .def_property_readonly("edges", [](const FeatureDefinition& feature) {
+            if (const auto* fillet = std::get_if<FilletFeature>(&feature.parameters)) return fillet->edges;
+            return std::vector<PersistentReference>{};
         })
         .def_readonly("suppressed", &FeatureDefinition::suppressed)
         .def_property_readonly("dependencies", [](const FeatureDefinition& feature) {
@@ -618,6 +660,17 @@ void bind_document(py::module_& module) {
             return document.add_subtractive_extrusion(std::move(name), DocumentId::parse(input),
                     DocumentId::parse(sketch), parse_depth_argument(depth)).to_string();
         }, py::arg("name"), py::arg("input_id"), py::arg("sketch_id"), py::arg("depth"))
+        .def("add_fillet", [](Document& document, std::string name, const std::string& input,
+                               std::vector<PersistentReference> edges, const py::object& radius) {
+            return document.add_fillet(std::move(name), DocumentId::parse(input), std::move(edges),
+                                       parse_depth_argument(radius, "fillet radius")).to_string();
+        }, py::arg("name"), py::arg("input_id"), py::arg("edges"), py::arg("radius"))
+        .def("set_fillet_radius", [](Document& document, const std::string& id, const py::object& radius) {
+            document.set_fillet_radius(DocumentId::parse(id), parse_depth_argument(radius, "fillet radius"));
+        }, py::arg("feature_id"), py::arg("radius"))
+        .def("set_fillet_edges", [](Document& document, const std::string& id, std::vector<PersistentReference> edges) {
+            document.set_fillet_edges(DocumentId::parse(id), std::move(edges));
+        }, py::arg("feature_id"), py::arg("edges"))
         .def("set_feature_depth", [](Document& document, const std::string& id,
                                       const py::object& depth) {
             document.set_feature_depth(DocumentId::parse(id), parse_depth_argument(depth));

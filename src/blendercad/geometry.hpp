@@ -27,6 +27,9 @@ public:
     [[nodiscard]] virtual ShapeHandle extrude_circle(Point2 center, double radius_mm,
                                                     const SketchPlane& plane, double depth_mm) = 0;
     [[nodiscard]] virtual ShapeHandle subtract(ShapeHandle body, ShapeHandle tool) = 0;
+    [[nodiscard]] virtual ShapeHandle fillet(ShapeHandle shape,
+                                            const std::vector<std::uint32_t>& edge_indices,
+                                            double radius_mm) = 0;
     [[nodiscard]] virtual DisplayMesh tessellate(ShapeHandle shape, double linear_deflection_mm,
                                                double angular_deflection_rad) const = 0;
     virtual void write_step(ShapeHandle shape, const std::string& path) const = 0;

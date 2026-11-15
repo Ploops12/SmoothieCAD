@@ -21,6 +21,9 @@ public:
                                         const TopologyReferences& argument,
                                         const TopologyReferences& tool,
                                         const DocumentId& feature);
+    static TopologyReferences operation(const GeometryTopology& topology,
+                                        const TopologyReferences& argument,
+                                        const DocumentId& feature);
     [[nodiscard]] ReferenceResolution resolve(TopologyKind kind, const ReferenceAnchor& anchor) const;
     [[nodiscard]] ReferenceAnchor capture(TopologyElement element) const;
 

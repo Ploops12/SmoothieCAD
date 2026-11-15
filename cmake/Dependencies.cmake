@@ -64,7 +64,7 @@ if(NOT OpenCASCADE_FOUND)
     if(CMAKE_TOOLCHAIN_FILE)
         list(APPEND _occt_options "-DCMAKE_TOOLCHAIN_FILE:FILEPATH=${CMAKE_TOOLCHAIN_FILE}")
     endif()
-    set(_occt_libraries TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlgo TKPrim TKBO TKBool TKMesh TKDESTEP TKXSBase)
+    set(_occt_libraries TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlgo TKPrim TKBO TKBool TKFillet TKMesh TKDESTEP TKXSBase)
     set(_occt_byproducts)
     foreach(_library IN LISTS _occt_libraries)
         list(APPEND _occt_byproducts "${_occt_prefix}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}${_library}${CMAKE_SHARED_LIBRARY_SUFFIX}")
@@ -84,7 +84,7 @@ if(NOT OpenCASCADE_FOUND)
             -DCMAKE_EXPORT_PACKAGE_REGISTRY:BOOL=OFF
             "-DINSTALL_DIR_LIB:STRING=lib"
             "-DINSTALL_DIR_INCLUDE:STRING=include/opencascade"
-            "-DBUILD_ADDITIONAL_TOOLKITS:STRING=TKPrim|TKBool|TKMesh|TKDESTEP"
+            "-DBUILD_ADDITIONAL_TOOLKITS:STRING=TKPrim|TKBool|TKFillet|TKMesh|TKDESTEP"
             -DBUILD_LIBRARY_TYPE:STRING=Shared
             -DBUILD_DOC_Overview:BOOL=OFF -DBUILD_SAMPLES_QT:BOOL=OFF -DBUILD_Inspector:BOOL=OFF
             ${_occt_options}

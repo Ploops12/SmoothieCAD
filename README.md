@@ -11,7 +11,7 @@ BlenderCAD is an ordinary Blender addon with a separate C++ computational core. 
 - `tests/`: geometry, sketch-solving, Solid/persistence, event-routing and CMake cleanup checks.
 - `docs/`: architecture and build/dependency notes.
 
-The native core provides stable IDs, versioned snapshots, atomic revisions, unit-tagged parameters, persistent sketches and extrusion/subtractive feature definitions. PlaneGCS solves sketch constraints; a revision-aware evaluator drives OCCT, caches unchanged results and retains explicitly stale displays on failure while blocking stale measurements/exports. Features support named length inputs, suppression, dependency-checked reorder/deletion and rollback. Construction-based topology references support explicit split/merged/deleted/ambiguous diagnostics and named-reference repair. The addon preserves definitions in Blender scene properties and presents bodies through non-mesh hosts with managed meshes. Face/edge/vertex selection, GPU highlights and kernel measurements now complement numeric rectangle/depth/parameter commands, definition duplication, conversion, deletion and load/undo reconstruction. Reference-consuming features and the complete interactive modelling workflow remain incomplete.
+The native core provides stable IDs, versioned snapshots, atomic revisions, unit-tagged parameters, persistent sketches and extrusion/subtractive/constant-radius fillet feature definitions. PlaneGCS solves sketch constraints; a revision-aware evaluator drives OCCT, caches unchanged results and retains explicitly stale displays on failure while blocking stale measurements/exports. Features support named length inputs, suppression, dependency-checked reorder/deletion and rollback. Construction-based topology references support explicit split/merged/deleted/ambiguous diagnostics and named-reference repair. The addon preserves definitions in Blender scene properties and presents bodies through non-mesh hosts with managed meshes. Face/edge/vertex selection, GPU highlights and kernel measurements now complement numeric rectangle/depth/parameter commands, definition duplication, conversion, deletion and load/undo reconstruction. Fillets consume persistent edge targets; the sidebar exposes suppression, rollback, dependency-checked reorder/deletion and explicit fillet input repair. The complete bracket workflow remains unaccepted.
 
 ## Build and package
 
@@ -36,6 +36,8 @@ See [Parameter expressions](docs/parameter-expressions.md) for dimensional arith
 See [Sketch dimensions](docs/sketch-dimensions.md) for parameter bindings, numeric dimension editing, solver resolution and schema-6 persistence.
 
 See [Interactive sketches](docs/interactive-sketches.md) for viewport drawing/constraints/dragging, transactional confirmation, and sketch extrusion/cuts.
+
+See [Fillets and history](docs/fillets-and-history.md) for persistent edge inputs, radius editing, explicit repair and schema-7 records.
 
 See [Features and evaluation](docs/features-and-evaluation.md) for body ownership, dependency history, caching, failures and query/export guards.
 

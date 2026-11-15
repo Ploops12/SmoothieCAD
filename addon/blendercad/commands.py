@@ -92,6 +92,87 @@ def set_depth(context, feature_id, depth):
     return commit(context.scene, document)
 
 
+def _fillet_picks(context, document, hosts):
+    if len(hosts) != 1 or p.host_for(context.active_object) != hosts[0]:
+        raise ValueError("Select CAD edges on exactly one active Solid")
+    host = hosts[0]
+    picks = [(owner, pick) for owner, pick, _packet in p.visible_selection(context.scene) if owner == host]
+    if not picks or any(pick.kind != "EDGE" for _owner, pick in picks):
+        raise ValueError("Select only CAD edges for the fillet")
+    return host, [p.persistent_target(context.scene, owner, pick) for owner, pick in picks]
+
+
+def add_fillet(context, radius):
+    document, hosts = selected(context, "edit_definition")
+    if document.rollback_before is not None:
+        raise ValueError("Return to the end of history before creating a fillet")
+    host, edges = _fillet_picks(context, document, hosts)
+    tip = next(item.id for item in reversed(document.features) if item.body_id == host[p.BODY])
+    feature = document.add_fillet("Fillet", tip, edges, radius)
+    commit(context.scene, document)
+    _select(context, [host[p.BODY]])
+    return feature
+
+
+def set_fillet_radius(context, feature_id, radius):
+    capabilities.require_capability(context.selected_objects, "edit_definition")
+    document = p.read_document(context.scene)
+    document.set_fillet_radius(feature_id, radius)
+    return commit(context.scene, document)
+
+
+def repair_fillet_edges(context, feature_id):
+    document, hosts = selected(context, "edit_definition")
+    feature = document.get_feature(feature_id)
+    if feature.type != "fillet" or document.rollback_before != feature_id:
+        raise ValueError("Roll back immediately before this fillet, then select its replacement input edges")
+    host, edges = _fillet_picks(context, document, hosts)
+    if host[p.BODY] != feature.body_id:
+        raise ValueError("Replacement edges must belong to the fillet's input Solid")
+    packet = p.current_packet(context.scene, host)
+    if packet.arrays["feature_id"] != feature.input_id:
+        raise ValueError("Selected edges are not from this fillet's input feature")
+    document.set_fillet_edges(feature_id, edges)
+    document.set_rollback_before(None)
+    return commit(context.scene, document)
+
+
+def suppress_feature(context, feature_id, suppressed):
+    capabilities.require_capability(context.selected_objects, "edit_definition")
+    document = p.read_document(context.scene)
+    document.set_feature_suppressed(feature_id, suppressed)
+    return commit(context.scene, document)
+
+
+def rollback(context, feature_id=""):
+    capabilities.require_capability(context.selected_objects, "edit_definition")
+    document = p.read_document(context.scene)
+    document.set_rollback_before(feature_id or None)
+    return commit(context.scene, document)
+
+
+def move_feature(context, feature_id, offset):
+    capabilities.require_capability(context.selected_objects, "edit_definition")
+    document = p.read_document(context.scene)
+    if isinstance(offset, bool) or offset not in (-1, 1):
+        raise ValueError("Move a feature one history position at a time")
+    order = [item.id for item in document.features]
+    index = order.index(feature_id)
+    destination = index + offset
+    if destination < 0 or destination >= len(order):
+        raise ValueError("Feature is already at this end of history")
+    order[index], order[destination] = order[destination], order[index]
+    document.reorder_features(order)
+    return commit(context.scene, document)
+
+
+def delete_feature(context, feature_id, cascade=False):
+    capabilities.require_capability(context.selected_objects, "edit_definition")
+    document = p.read_document(context.scene)
+    document.erase_feature(feature_id, cascade=cascade)
+    return commit(context.scene, document)
+
+
 def set_sketch_dimension(context, sketch_id, constraint_id, value):
     capabilities.require_capability(context.selected_objects, "edit_definition")
     document = p.read_document(context.scene)
@@ -192,7 +273,7 @@ def _clone_body(document, body_id):
     chain = [feature for feature in snapshot["features"] if feature["body"] == body_id]
     if not chain:
         raise ValueError("Selected body is not defined in this document")
-    sketch_ids = {feature["sketch"] for feature in chain}
+    sketch_ids = {feature["sketch"] for feature in chain if "sketch" in feature}
     sketches = [sketch for sketch in snapshot["sketches"] if sketch["id"] in sketch_ids]
     identifiers = [body_id] + [feature["id"] for feature in chain]
     for sketch in sketches:
@@ -211,14 +292,20 @@ def _clone_body(document, body_id):
         snapshot["sketches"].append(sketch)
     for feature in copy.deepcopy(chain):
         for key in ("id", "body", "sketch", "input"):
-            if feature[key] is not None:
+            if key in feature and feature[key] is not None:
                 feature[key] = remap[feature[key]]
+        for edge in feature.get("edges", ()):
+            original = n.PersistentReference(edge["body"], n.TopologyKind.EDGE,
+                                             n.ReferenceAnchor(edge["feature"], edge["key"]))
+            target = n.remap_reference(original, remap)
+            edge.update(body=target.body_id, feature=target.anchor.feature_id, key=target.anchor.key)
         feature["name"] += " copy"
         snapshot["features"].append(feature)
     snapshot["revision"] += 1
-    # Named references are document-level bookmarks, not feature inputs yet.
+    # Named references are document-level bookmarks; inline fillet inputs were
+    # remapped above through the native construction-key codec.
     # Preserve their original body targets; do not silently retarget them to the
-    # copy. Future consuming features must clone/remap their explicit inputs.
+    # copy. New consuming feature types must clone/remap their explicit inputs.
     # The native document validates all global identities, units and dependencies
     # before the cloned definitions can be published. Named parameters deliberately
     # remain shared document-level inputs, not copied Blender object properties.

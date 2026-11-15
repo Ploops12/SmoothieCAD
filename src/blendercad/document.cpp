@@ -89,7 +89,7 @@ double resolve_length(const DepthInput& input, const std::vector<Parameter>& par
     const auto& name = std::get<std::string>(input);
     const auto found = std::ranges::find_if(parameters, [&](const auto& parameter) { return parameter.name == name; });
     if (found == parameters.end()) throw std::invalid_argument("unknown length parameter: " + name);
-    if (found->unit != ParameterUnit::Millimetre) throw std::invalid_argument("feature depth requires a length parameter in mm");
+    if (found->unit != ParameterUnit::Millimetre) throw std::invalid_argument("feature dimension requires a length parameter in mm");
     return found->value;
 }
 
@@ -108,16 +108,43 @@ void validate_design(const DocumentId& id, const std::vector<Parameter>& paramet
         insert(feature.id);
         validate_name(feature.name);
         if (feature.version != 1) throw std::invalid_argument("unsupported feature definition version");
-        if (!sketch_ids.contains(feature_sketch(feature).to_string())) throw std::invalid_argument("feature references a missing sketch");
-        (void)resolve_length(feature_depth(feature), parameters);
+        if (const auto sketch = feature_sketch(feature); sketch && !sketch_ids.contains(sketch->to_string())) {
+            throw std::invalid_argument("feature references a missing sketch");
+        }
+        (void)resolve_length(feature_length(feature), parameters);
         const auto body = feature.body.to_string();
         if (const auto input = feature_input(feature)) {
             const auto found = available.find(input->to_string());
             if (found == available.end()) throw std::invalid_argument("feature dependency must precede its consumer");
-            if (found->second->body != feature.body) throw std::invalid_argument("subtractive feature must retain its input body identity");
+            if (found->second->body != feature.body) throw std::invalid_argument("dependent feature must retain its input body identity");
             if (body_tips.at(body) != *input) throw std::invalid_argument("feature input must be the current body history tip");
         } else {
             insert(feature.body);
+        }
+        if (const auto* fillet = std::get_if<FilletFeature>(&feature.parameters)) {
+            if (fillet->edges.empty()) throw std::invalid_argument("fillet requires at least one persistent edge reference");
+            std::unordered_set<std::string> ancestors;
+            auto ancestor = std::optional{fillet->input};
+            while (ancestor) {
+                const auto& source = *available.at(ancestor->to_string());
+                ancestors.insert(ancestor->to_string());
+                ancestor = feature_input(source);
+            }
+            for (std::size_t index = 0; index < fillet->edges.size(); ++index) {
+                const auto& edge = fillet->edges[index];
+                validate_reference(edge);
+                if (edge.kind != TopologyKind::Edge) throw std::invalid_argument("fillet targets must be persistent EDGE references");
+                if (edge.body != feature.body) throw std::invalid_argument("fillet edge reference belongs to a different body");
+                const auto creator = available.find(edge.anchor.feature.to_string());
+                if (creator == available.end()) throw std::invalid_argument("fillet edge anchor creator must precede its consumer");
+                if (creator->second->body != feature.body || !ancestors.contains(edge.anchor.feature.to_string())) {
+                    throw std::invalid_argument("fillet edge anchor creator must belong to its input ancestor chain");
+                }
+                if (std::find(fillet->edges.begin(), fillet->edges.begin() + static_cast<std::ptrdiff_t>(index), edge)
+                        != fillet->edges.begin() + static_cast<std::ptrdiff_t>(index)) {
+                    throw std::invalid_argument("fillet contains a duplicate persistent edge reference");
+                }
+            }
         }
         body_tips.insert_or_assign(body, feature.id);
         available.emplace(feature.id.to_string(), &feature);
@@ -418,10 +445,41 @@ DocumentId Document::add_subtractive_extrusion(std::string name, const DocumentI
 }
 
 void Document::set_feature_depth(const DocumentId& id, DepthInput depth) {
-    (void)feature(id);
+    (void)feature_depth(feature(id));
     auto candidate = features_;
     for (auto& feature : candidate) {
-        if (feature.id == id) std::visit([&](auto& parameters) { parameters.depth = std::move(depth); }, feature.parameters);
+        if (feature.id != id) continue;
+        if (auto* extrusion = std::get_if<ExtrusionFeature>(&feature.parameters)) extrusion->depth = std::move(depth);
+        else std::get<SubtractiveExtrusionFeature>(feature.parameters).depth = std::move(depth);
+    }
+    publish_design(sketches_, std::move(candidate), rollback_before_);
+}
+
+DocumentId Document::add_fillet(std::string name, const DocumentId& input,
+                                std::vector<PersistentReference> edges, DepthInput radius) {
+    const auto body = feature(input).body;
+    const auto id = DocumentId::generate();
+    auto candidate = features_;
+    candidate.push_back({id, std::move(name), 1, body,
+                         FilletFeature{input, std::move(radius), std::move(edges)}, false});
+    publish_design(sketches_, std::move(candidate), rollback_before_);
+    return id;
+}
+
+void Document::set_fillet_radius(const DocumentId& id, DepthInput radius) {
+    (void)feature_radius(feature(id));
+    auto candidate = features_;
+    for (auto& feature : candidate) {
+        if (feature.id == id) std::get<FilletFeature>(feature.parameters).radius = std::move(radius);
+    }
+    publish_design(sketches_, std::move(candidate), rollback_before_);
+}
+
+void Document::set_fillet_edges(const DocumentId& id, std::vector<PersistentReference> edges) {
+    (void)feature_radius(feature(id));
+    auto candidate = features_;
+    for (auto& feature : candidate) {
+        if (feature.id == id) std::get<FilletFeature>(feature.parameters).edges = std::move(edges);
     }
     publish_design(sketches_, std::move(candidate), rollback_before_);
 }
@@ -449,7 +507,9 @@ void Document::erase_feature(const DocumentId& id, bool cascade) {
     std::unordered_set<std::string> removed{id.to_string()};
     std::vector<FeatureDefinition> candidate;
     for (const auto& feature : features_) {
-        if (const auto input = feature_input(feature); input && removed.contains(input->to_string())) {
+        if (std::ranges::any_of(feature_dependencies(feature), [&](const auto& dependency) {
+                return removed.contains(dependency.to_string());
+            })) {
             if (!cascade) throw std::invalid_argument("feature has dependent: " + feature.id.to_string());
             removed.insert(feature.id.to_string());
         }
@@ -476,8 +536,9 @@ void Document::erase_sketch(const DocumentId& id, bool cascade) {
     std::unordered_set<std::string> removed;
     std::vector<FeatureDefinition> features;
     for (const auto& feature : features_) {
-        const auto input = feature_input(feature);
-        if (feature_sketch(feature) == id || (input && removed.contains(input->to_string()))) {
+        if (feature_sketch(feature) == id || std::ranges::any_of(feature_dependencies(feature), [&](const auto& dependency) {
+                return removed.contains(dependency.to_string());
+            })) {
             if (!cascade) throw std::invalid_argument("sketch has dependent feature: " + feature.id.to_string());
             removed.insert(feature.id.to_string());
         } else features.push_back(feature);

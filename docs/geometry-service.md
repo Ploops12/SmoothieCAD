@@ -7,6 +7,9 @@
 - Box construction with positive finite dimensions in millimetres.
 - Closed polygon and circle extrusion on an arbitrary orthonormal sketch plane. Profile coordinates and positive extrusion depth are millimetres; the direction is the plane's right-handed normal. Polygons are closed automatically and must define a valid planar face.
 - Boolean subtraction of two evaluated solids.
+- Constant-radius edge fillets on deep-copied solid inputs; direct OCCT history and
+  separate exact face-boundary provenance are translated by the
+  [reference-consuming feature](fillets-and-history.md).
 - Kernel validity, analytic volume in mm³, and maximum vertex/edge/face tolerance queries.
 - Tessellation with independently specified absolute linear deflection in mm and angular deflection in radians.
 - STEP solid import and export using millimetres as the internal length unit.
@@ -14,7 +17,7 @@
 
 The adapter rejects null, invalid, and non-solid results before allocating a handle. Each adapter accepts a configurable geometric tolerance budget, defaulting to **0.001 mm**. Results with OCCT topology tolerances exceeding that budget are rejected; the budget is never silently increased. This check is not a general proof of geometric accuracy, nor a substitute for exchange-deviation validation. Display deflection is separate and does not change modeling tolerance.
 
-These are low-level kernel operations, not saved CAD features. The [feature evaluator](features-and-evaluation.md) associates results with feature/body identities and document snapshots and guards current queries/exports. The low-level adapter alone has no document association. `topology(handle)` reports extrusion construction seeds and subtraction change relationships with evaluated-local typed indices; the [reference service](persistent-references.md) maps those inputs to persistent identities. Local indices themselves must not enter saved references.
+These are low-level kernel operations, not saved CAD features. The [feature evaluator](features-and-evaluation.md) associates results with feature/body identities and document snapshots and guards current queries/exports. The low-level adapter alone has no document association. `topology(handle)` reports extrusion construction seeds and subtraction/fillet change relationships with evaluated-local typed indices; the [reference service](persistent-references.md) maps those inputs to persistent identities. Local indices themselves must not enter saved references.
 
 ## Bulk presentation data
 

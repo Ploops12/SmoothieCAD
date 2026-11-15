@@ -107,7 +107,7 @@ Every display publication/load/undo/redo replaces the packet token and clears
 subelement selection/inspection. Scene-unit changes reject old packets until
 recomputation, and the panel indicates that recomputation is needed. Naming
 translation still goes through [persistent references](persistent-references.md).
-Only persistent definitions enter the document snapshot; query/pick caches add no schema fields. Current schema 6 separately stores [parameter expressions](parameter-expressions.md) and [sketch dimension bindings](sketch-dimensions.md).
+Only persistent definitions enter the document snapshot; query/pick caches add no schema fields. Current schema 7 separately stores [parameter expressions](parameter-expressions.md), [sketch dimension bindings](sketch-dimensions.md) and [persistent fillet edge inputs](fillets-and-history.md).
 The selection-mode setting is presentation state stored by Blender.
 
 `highlight.py` creates shaders/batches lazily inside an interactive POST_VIEW

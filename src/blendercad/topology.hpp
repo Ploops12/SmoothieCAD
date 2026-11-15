@@ -30,6 +30,11 @@ struct TopologyHistoryEntry final {
     std::vector<TopologyElement> modified; // Includes unchanged identical output.
     std::vector<TopologyElement> generated;
     bool deleted{}; // Explicit OCCT IsDeleted; missing history is not deletion.
+    // Separate from OCCT Generated: new result edges/vertices on the exact
+    // boundary of an output face explicitly reported Modified/Generated from
+    // this source. The adapter establishes incidence by IsSame membership,
+    // never geometric proximity. This is not a same-kind continuation.
+    std::vector<TopologyElement> boundary_generated{};
 };
 
 struct GeometryTopology final {

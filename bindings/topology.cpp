@@ -32,7 +32,8 @@ void bind_topology(py::module_& module) {
         .def_property_readonly("source", [](const TopologyHistoryEntry& entry) { return entry.source; })
         .def_property_readonly("modified", [](const TopologyHistoryEntry& entry) { return entry.modified; })
         .def_property_readonly("generated", [](const TopologyHistoryEntry& entry) { return entry.generated; })
-        .def_readonly("deleted", &TopologyHistoryEntry::deleted);
+        .def_readonly("deleted", &TopologyHistoryEntry::deleted)
+        .def_property_readonly("boundary_generated", [](const TopologyHistoryEntry& entry) { return entry.boundary_generated; });
     py::class_<GeometryTopology>(module, "GeometryTopology")
         .def_property_readonly("counts", [](const GeometryTopology& topology) { return topology.counts; })
         .def_property_readonly("seeds", [](const GeometryTopology& topology) { return topology.seeds; })

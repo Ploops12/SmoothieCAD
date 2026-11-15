@@ -12,6 +12,7 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepGProp.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepLProp_SLProps.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
@@ -48,6 +49,7 @@
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace blendercad {
 namespace {
@@ -294,6 +296,57 @@ public:
         result_topology.argument_history = history_for(cut, argument_record.shape, argument_record.topology, result_maps);
         result_topology.tool_history = history_for(cut, tool_record.shape, tool_record.topology, result_maps);
         return store(result_shape, {}, std::move(result_topology), true);
+    }
+
+    ShapeHandle fillet(ShapeHandle shape, const std::vector<std::uint32_t>& edge_indices,
+                       double radius_mm) override {
+        const auto argument = lookup_record(shape);
+        if (!std::isfinite(radius_mm) || radius_mm <= 0) {
+            throw std::invalid_argument("fillet radius must be finite and positive");
+        }
+        if (edge_indices.empty()) throw std::invalid_argument("fillet requires at least one CAD edge");
+        const auto original_maps = topology_maps(argument.shape);
+        std::unordered_set<std::uint32_t> selected;
+        for (const auto index : edge_indices) {
+            if (index >= static_cast<std::uint32_t>(original_maps[1].Extent())) {
+                throw std::invalid_argument("fillet edge index is out of range for this evaluated shape");
+            }
+            if (!selected.insert(index).second) {
+                throw std::invalid_argument("fillet edge indices must be unique");
+            }
+        }
+
+        // The local-operation builder can change its argument's TShapes and
+        // underlying curves/surfaces even if construction later fails. Never
+        // give it authoritative cached geometry or share the argument's meshes.
+        BRepBuilderAPI_Copy copier(argument.shape, true, false);
+        if (!copier.IsDone()) throw std::runtime_error("could not copy CAD geometry for filleting");
+        BRepFilletAPI_MakeFillet builder(copier.Shape());
+        for (const auto index : edge_indices) {
+            const auto copied = copier.ModifiedShape(original_maps[1](static_cast<int>(index + 1)));
+            if (copied.IsNull() || copied.ShapeType() != TopAbs_EDGE) {
+                throw std::runtime_error("could not map selected CAD edge into the fillet copy");
+            }
+            const auto edge = TopoDS::Edge(copied);
+            builder.Add(radius_mm, edge);
+            if (builder.Contour(edge) == 0) {
+                throw std::runtime_error("OCCT could not initialize a fillet contour for a selected edge");
+            }
+        }
+        builder.Build();
+        if (!builder.IsDone()) throw std::runtime_error("OCCT constant-radius fillet failed");
+        const auto result_shape = builder.Shape();
+        const auto result_maps = topology_maps(result_shape);
+        GeometryTopology topology;
+        for (std::size_t slot = 0; slot < result_maps.size(); ++slot) {
+            topology.counts[slot] = static_cast<std::uint32_t>(result_maps[slot].Extent());
+        }
+        // History source ordinals always address the original authoritative
+        // input. Query the builder with its copied counterpart, including exact
+        // unchanged IsSame elements; never match geometry by proximity.
+        topology.argument_history = history_for(builder, argument.shape, argument.topology, result_maps, &copier);
+        append_boundary_history(topology.argument_history, result_maps);
+        return store(result_shape, {}, std::move(topology), true);
     }
 
     DisplayMesh tessellate(ShapeHandle handle, double linear_deflection_mm,
@@ -546,11 +599,12 @@ private:
         return maps[slot](static_cast<int>(element.index + 1));
     }
 
-    template <typename BooleanOperation>
-    static std::vector<TopologyHistoryEntry> history_for(BooleanOperation& operation,
+    template <typename ShapeOperation>
+    static std::vector<TopologyHistoryEntry> history_for(ShapeOperation& operation,
                                                          const TopoDS_Shape& input,
                                                          const GeometryTopology& input_topology,
-                                                         const TopologyMaps& result_maps) {
+                                                         const TopologyMaps& result_maps,
+                                                         const BRepBuilderAPI_Copy* input_copy = nullptr) {
         const auto input_maps = topology_maps(input);
         std::vector<TopologyHistoryEntry> history;
         for (std::size_t slot = 0; slot < input_maps.size(); ++slot) {
@@ -558,13 +612,17 @@ private:
                 throw std::runtime_error("input topology metadata does not match its authoritative shape");
             }
             for (int index = 1; index <= input_maps[slot].Extent(); ++index) {
-                const auto source = input_maps[slot](index);
+                const auto original = input_maps[slot](index);
+                const auto source = input_copy ? input_copy->ModifiedShape(original) : original;
+                if (source.IsNull() || source.ShapeType() != original.ShapeType()) {
+                    throw std::runtime_error("operation history could not map an authoritative input element");
+                }
                 TopologyHistoryEntry entry{{public_kind(slot), static_cast<std::uint32_t>(index - 1)}, {}, {},
                                             operation.IsDeleted(source)};
 
                 // Modified is a same-kind continuation. Preserve only shapes
                 // actually reported by OCCT, then explicitly include an
-                // unchanged IsSame member when the boolean kept it in the result.
+                // unchanged IsSame member when the operation kept it in the result.
                 const auto modified = operation.Modified(source);
                 for (TopTools_ListIteratorOfListOfShape iterator(modified); iterator.More(); iterator.Next()) {
                     const auto& output = iterator.Value();
@@ -590,6 +648,47 @@ private:
             }
         }
         return history;
+    }
+
+    static void append_boundary_history(std::vector<TopologyHistoryEntry>& history,
+                                         const TopologyMaps& result_maps) {
+        // MakeFillet reports the new round face but can omit its boundary
+        // edges/vertices from Generated. Preserve that omission in the direct
+        // kernel history and record a distinct, exact face-incidence relation.
+        // Existing traced output elements keep their established naming path.
+        std::array<std::vector<bool>, 3> traced;
+        for (std::size_t slot = 0; slot < result_maps.size(); ++slot) {
+            traced[slot].resize(static_cast<std::size_t>(result_maps[slot].Extent()));
+        }
+        auto mark = [&](TopologyElement target) {
+            const auto slot = query_slot(target.kind);
+            if (target.index >= traced[slot].size()) throw std::runtime_error("operation history target index is out of range");
+            traced[slot][target.index] = true;
+        };
+        for (const auto& entry : history) {
+            for (const auto target : entry.modified) mark(target);
+            for (const auto target : entry.generated) mark(target);
+        }
+        for (auto& entry : history) {
+            std::vector<TopologyElement> faces;
+            for (const auto target : entry.modified) {
+                if (target.kind == TopologyKind::Face) append_unique(faces, target);
+            }
+            for (const auto target : entry.generated) {
+                if (target.kind == TopologyKind::Face) append_unique(faces, target);
+            }
+            for (const auto face : faces) {
+                const auto& output = result_maps[0](static_cast<int>(face.index + 1));
+                for (const auto kind : {TopAbs_EDGE, TopAbs_VERTEX}) {
+                    for (TopExp_Explorer boundary(output, kind); boundary.More(); boundary.Next()) {
+                        const auto element = find_output_element(result_maps, boundary.Current());
+                        if (element && !traced[query_slot(element->kind)][element->index]) {
+                            append_unique(entry.boundary_generated, *element);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     ShapeHandle store(TopoDS_Shape shape, const std::vector<PrismSeedRelation>& seeds = {},

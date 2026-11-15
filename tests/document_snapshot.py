@@ -113,7 +113,7 @@ class DocumentSnapshotChecks(unittest.TestCase):
         self.assertEqual(restored.id, document.id)
         self.assertEqual([item.id for item in restored.sketches], [item["id"] for item in original["sketches"]])
 
-    def test_schema_one_migrates_in_memory_and_emits_schema_six(self):
+    def test_schema_one_migrates_in_memory_and_emits_schema_seven(self):
         document = n.Document()
         document.add_parameter("height", 4.0, "mm")
         old_snapshot = document.to_snapshot()
@@ -123,21 +123,21 @@ class DocumentSnapshotChecks(unittest.TestCase):
         del old_snapshot["rollback_before"]
         del old_snapshot["references"]
         restored = n.Document.from_snapshot(old_snapshot)
-        self.assertEqual(restored.schema_version, 6)
-        self.assertEqual(restored.to_snapshot()["schema_version"], 6)
+        self.assertEqual(restored.schema_version, 7)
+        self.assertEqual(restored.to_snapshot()["schema_version"], 7)
         self.assertEqual(restored.sketches, [])
         self.assertEqual(restored.references, [])
         self.assertEqual(restored.revision, old_snapshot["revision"])
 
-    def test_schema_two_migrates_in_memory_and_emits_schema_six(self):
+    def test_schema_two_migrates_in_memory_and_emits_schema_seven(self):
         snapshot = complete_document().to_snapshot()
         snapshot["schema_version"] = 2
         del snapshot["features"]
         del snapshot["rollback_before"]
         del snapshot["references"]
         restored = n.Document.from_snapshot(snapshot)
-        self.assertEqual(restored.schema_version, 6)
-        self.assertEqual(restored.to_snapshot()["schema_version"], 6)
+        self.assertEqual(restored.schema_version, 7)
+        self.assertEqual(restored.to_snapshot()["schema_version"], 7)
         self.assertEqual(restored.to_snapshot()["sketches"], snapshot["sketches"])
         self.assertEqual(restored.to_snapshot()["features"], [])
         self.assertIsNone(restored.rollback_before)
@@ -151,7 +151,7 @@ class DocumentSnapshotChecks(unittest.TestCase):
         snapshot["schema_version"] = 3
         del snapshot["references"]
         restored = n.Document.from_snapshot(snapshot)
-        self.assertEqual(restored.schema_version, 6)
+        self.assertEqual(restored.schema_version, 7)
         self.assertEqual(restored.references, [])
         self.assertEqual(restored.revision, snapshot["revision"])
         upgraded = restored.to_snapshot()
@@ -184,6 +184,22 @@ class DocumentSnapshotChecks(unittest.TestCase):
         self.assertEqual(restored.parameters[-1].value, 32.5 * 1.25)
         self.assertEqual(legacy["schema_version"], 5)
 
+    def test_schema_six_retains_bound_sketch_dimensions(self):
+        document = complete_document()
+        sketch = document.sketches[0].id
+        radius = next(item.id for item in document.get_sketch(sketch).constraints if item.kind == n.SketchConstraintKind.RADIUS)
+        document.add_parameter("hole_radius", 2, "mm")
+        document.set_sketch_dimension(sketch, radius, "hole_radius")
+        current = document.to_snapshot()
+        legacy = copy.deepcopy(current)
+        legacy["schema_version"] = 6
+        self.assertEqual(legacy["sketches"][0]["version"], 2)
+        restored = n.Document.from_snapshot(legacy)
+        self.assertEqual(restored.to_snapshot(), current)
+        self.assertEqual(restored.revision, document.revision)
+        self.assertEqual(next(item.parameter for item in restored.get_sketch(sketch).constraints if item.id == radius), "hole_radius")
+        self.assertEqual(legacy["schema_version"], 6)
+
     def test_named_reference_round_trip_repair_and_copy_out(self):
         document, _, _, extrusion, pocket = feature_document()
         ids = [document.add_reference(name, reference_target(document, extrusion, key, kind))
@@ -191,7 +207,7 @@ class DocumentSnapshotChecks(unittest.TestCase):
                                        ("Outer edge", "edge:start:source", n.TopologyKind.EDGE),
                                        ("Corner", "vertex:start:source", n.TopologyKind.VERTEX))]
         snapshot = document.to_snapshot()
-        self.assertEqual(snapshot["schema_version"], 6)
+        self.assertEqual(snapshot["schema_version"], 7)
         self.assertEqual(set(snapshot["references"][0]), {"id", "name", "version", "body", "kind", "feature", "key"})
         self.assertEqual([item["kind"] for item in snapshot["references"]], ["face", "edge", "vertex"])
         self.assertEqual(n.Document.from_snapshot(json.loads(json.dumps(snapshot))).to_snapshot(), snapshot)

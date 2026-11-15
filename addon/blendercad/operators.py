@@ -1,7 +1,7 @@
 """Blender UI adapters. Modelling behavior belongs to the command service."""
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 from mathutils import Vector
 
 from . import commands, presentation as p
@@ -92,6 +92,98 @@ class BLENDERCAD_OT_extrude_sketch(CadOperator, bpy.types.Operator):
             input_id = next(item.id for item in reversed(document.features) if item.body_id == hosts[0][p.BODY])
         commands.extrude_sketch(context, self.sketch_id, self.parameter if self.parameter else self.depth_mm, input_id)
         frame_solids(context, p.selected_hosts(context))
+
+
+class BLENDERCAD_OT_fillet(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.fillet"
+    bl_label = "Fillet Selected CAD Edges"
+    bl_description = "Round selected CAD edge contours with a constant radius and persistent input references"
+    radius_mm: FloatProperty(name="Radius (mm)", default=1, min=0.001)
+    parameter: StringProperty(name="Radius parameter", description="Optional named length parameter instead of a literal radius")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def run(self, context):
+        commands.add_fillet(context, self.parameter if self.parameter else self.radius_mm)
+
+
+class BLENDERCAD_OT_set_fillet_radius(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.set_fillet_radius"
+    bl_label = "Edit Fillet Radius"
+    feature_id: StringProperty(options={"HIDDEN"})
+    radius_mm: FloatProperty(name="Radius (mm)", default=1)
+    parameter: StringProperty(name="Radius parameter", description="Leave empty to use the literal radius")
+
+    def invoke(self, context, event):
+        try:
+            value = p.read_document(context.scene).get_feature(self.feature_id).radius
+            if value is None:
+                raise ValueError("Select a fillet feature")
+            self.parameter = value if isinstance(value, str) else ""
+            self.radius_mm = p.read_document(context.scene).length_value(value)
+        except (ValueError, KeyError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        return context.window_manager.invoke_props_dialog(self)
+
+    def run(self, context):
+        commands.set_fillet_radius(context, self.feature_id, self.parameter if self.parameter else self.radius_mm)
+
+
+class BLENDERCAD_OT_repair_fillet_edges(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.repair_fillet_edges"
+    bl_label = "Repair Fillet Edges and Resume"
+    bl_description = "Replace this fillet's input references from selected edges at its rollback input, then return to full history"
+    feature_id: StringProperty(options={"HIDDEN"})
+
+    def run(self, context):
+        commands.repair_fillet_edges(context, self.feature_id)
+
+
+class BLENDERCAD_OT_suppress_feature(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.suppress_feature"
+    bl_label = "Set CAD Feature Suppression"
+    bl_description = "Retain a feature definition while making its result unavailable to dependent features"
+    feature_id: StringProperty(options={"HIDDEN"})
+    suppressed: BoolProperty(default=True)
+
+    def run(self, context):
+        commands.suppress_feature(context, self.feature_id, self.suppressed)
+
+
+class BLENDERCAD_OT_rollback(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.rollback"
+    bl_label = "Set CAD History Position"
+    bl_description = "Expose history before a feature without deleting later definitions; empty target resumes full history"
+    feature_id: StringProperty(options={"HIDDEN"})
+
+    def run(self, context):
+        commands.rollback(context, self.feature_id)
+
+
+class BLENDERCAD_OT_move_feature(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.move_feature"
+    bl_label = "Move CAD Feature"
+    bl_description = "Move one history position only when all input and persistent-reference dependencies remain valid"
+    feature_id: StringProperty(options={"HIDDEN"})
+    offset: IntProperty(default=1, min=-1, max=1)
+
+    def run(self, context):
+        commands.move_feature(context, self.feature_id, self.offset)
+
+
+class BLENDERCAD_OT_delete_feature(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.delete_feature"
+    bl_label = "Delete CAD Feature"
+    feature_id: StringProperty(options={"HIDDEN"})
+    cascade: BoolProperty(name="Delete dependent features and saved references", default=False)
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def run(self, context):
+        commands.delete_feature(context, self.feature_id, self.cascade)
 
 
 class BLENDERCAD_OT_recompute(CadOperator, bpy.types.Operator):
@@ -305,6 +397,8 @@ class BLENDERCAD_OT_pick_solid(bpy.types.Operator):
 
 
 _classes = (BLENDERCAD_OT_add_rectangle_solid, BLENDERCAD_OT_extrude_sketch, BLENDERCAD_OT_recompute, BLENDERCAD_OT_set_sketch_dimension,
+            BLENDERCAD_OT_fillet, BLENDERCAD_OT_set_fillet_radius, BLENDERCAD_OT_repair_fillet_edges,
+            BLENDERCAD_OT_suppress_feature, BLENDERCAD_OT_rollback, BLENDERCAD_OT_move_feature, BLENDERCAD_OT_delete_feature,
             BLENDERCAD_OT_set_feature_depth, BLENDERCAD_OT_parameter,
             BLENDERCAD_OT_duplicate_solid, BLENDERCAD_OT_frame_solid, BLENDERCAD_OT_delete_solid,
             BLENDERCAD_OT_convert_to_regular_mesh, BLENDERCAD_OT_pick_solid,

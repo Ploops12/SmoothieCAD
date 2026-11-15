@@ -51,14 +51,18 @@ TopologyReferences TopologyReferences::operation(const GeometryTopology& topolog
                                                 const DocumentId& feature) {
     TopologyReferences result;
     std::array<std::vector<std::set<std::string>>, 3> origins;
+    std::array<std::vector<std::set<std::string>>, 3> boundary_origins;
     std::array<std::vector<std::set<std::string>>, 3> same_kind_sources;
     std::array<std::vector<bool>, 3> incomplete_origins;
+    std::array<std::vector<bool>, 3> incomplete_boundary_origins;
     bool complete_history = true;
     for (std::size_t kind = 0; kind < 3; ++kind) {
         result.elements_[kind].resize(topology.counts[kind]);
         origins[kind].resize(topology.counts[kind]);
+        boundary_origins[kind].resize(topology.counts[kind]);
         same_kind_sources[kind].resize(topology.counts[kind]);
         incomplete_origins[kind].resize(topology.counts[kind]);
+        incomplete_boundary_origins[kind].resize(topology.counts[kind]);
     }
     auto check_target = [&](TopologyElement target) -> std::size_t {
         const auto kind = domain(target.kind);
@@ -110,6 +114,15 @@ TopologyReferences TopologyReferences::operation(const GeometryTopology& topolog
                 origins[output_kind][target.index].insert(origin_names.begin(), origin_names.end());
                 incomplete_origins[output_kind][target.index] = incomplete_origins[output_kind][target.index] || incomplete_source;
             }
+            for (const auto target : entry.boundary_generated) {
+                // Incidence names new topology, even when source and target
+                // have the same kind. Never inherit a deleted edge/vertex tag
+                // as though the boundary were its uniquely chosen survivor.
+                const auto output_kind = check_target(target);
+                if (target.kind == TopologyKind::Face) throw std::invalid_argument("face-boundary history must target an edge or vertex");
+                boundary_origins[output_kind][target.index].insert(origin_names.begin(), origin_names.end());
+                incomplete_boundary_origins[output_kind][target.index] = incomplete_boundary_origins[output_kind][target.index] || incomplete_source;
+            }
             if (continuations.empty()) {
                 for (const auto& tag : tags) result.lost_.push_back({entry.source.kind, tag.anchor, entry.deleted});
             }
@@ -142,6 +155,12 @@ TopologyReferences TopologyReferences::operation(const GeometryTopology& topolog
                 if (key.size() <= 65536) tags.push_back({{feature, std::move(key)}, false, false,
                                                         incomplete_origins[kind][index] || !complete_history});
             }
+            if (!boundary_origins[kind][index].empty()) {
+                std::string key = "boundary:" + std::to_string(kind) + ":";
+                for (const auto& origin : boundary_origins[kind][index]) key += std::to_string(origin.size()) + ":" + origin;
+                if (key.size() <= 65536) tags.push_back({{feature, std::move(key)}, false, false,
+                                                        incomplete_boundary_origins[kind][index] || !complete_history});
+            }
         }
         std::map<std::string, std::size_t> multiplicity;
         for (const auto& tags : result.elements_[kind]) {
@@ -151,11 +170,22 @@ TopologyReferences TopologyReferences::operation(const GeometryTopology& topolog
         }
         for (auto& tags : result.elements_[kind]) {
             for (auto& tag : tags) {
-                if (tag.anchor.feature == feature && tag.anchor.key.starts_with("derived:") && multiplicity[signature(tag.anchor)] > 1) tag.ambiguous = true;
+                if (tag.anchor.feature == feature &&
+                    (tag.anchor.key.starts_with("derived:") || tag.anchor.key.starts_with("boundary:")) &&
+                    multiplicity[signature(tag.anchor)] > 1) tag.ambiguous = true;
             }
         }
     }
     return result;
+}
+
+TopologyReferences TopologyReferences::operation(const GeometryTopology& topology,
+                                                const TopologyReferences& argument,
+                                                const DocumentId& feature) {
+    if (!topology.tool_history.empty()) {
+        throw std::invalid_argument("unary topology operation cannot contain tool history");
+    }
+    return operation(topology, argument, TopologyReferences{}, feature);
 }
 
 ReferenceResolution TopologyReferences::resolve(TopologyKind kind, const ReferenceAnchor& anchor) const {
@@ -201,7 +231,8 @@ ReferenceAnchor TopologyReferences::capture(TopologyElement element) const {
     if (element.index >= elements.size()) throw std::invalid_argument("topology index out of range");
     auto candidates = elements[element.index];
     std::ranges::sort(candidates, [](const auto& a, const auto& b) {
-        const bool a_derived = a.anchor.key.starts_with("derived:"), b_derived = b.anchor.key.starts_with("derived:");
+        const bool a_derived = a.anchor.key.starts_with("derived:") || a.anchor.key.starts_with("boundary:");
+        const bool b_derived = b.anchor.key.starts_with("derived:") || b.anchor.key.starts_with("boundary:");
         if (a_derived != b_derived) return !a_derived;
         return signature(a.anchor) < signature(b.anchor);
     });

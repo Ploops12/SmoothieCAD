@@ -36,7 +36,7 @@ struct Parameter final {
 // held by GeometryAdapter and are not part of this snapshot.
 class Document final {
 public:
-    static constexpr std::uint32_t current_schema_version = 6;
+    static constexpr std::uint32_t current_schema_version = 7;
     static constexpr double default_geometric_tolerance_mm = 0.001;
 
     Document();
@@ -75,7 +75,11 @@ public:
     DocumentId add_extrusion(std::string name, const DocumentId& sketch, DepthInput depth);
     DocumentId add_subtractive_extrusion(std::string name, const DocumentId& input,
                                          const DocumentId& sketch, DepthInput depth);
+    DocumentId add_fillet(std::string name, const DocumentId& input,
+                          std::vector<PersistentReference> edges, DepthInput radius);
     void set_feature_depth(const DocumentId& id, DepthInput depth);
+    void set_fillet_radius(const DocumentId& id, DepthInput radius);
+    void set_fillet_edges(const DocumentId& id, std::vector<PersistentReference> edges);
     void set_feature_suppressed(const DocumentId& id, bool suppressed);
     void reorder_features(const std::vector<DocumentId>& order);
     void set_rollback_before(std::optional<DocumentId> id);

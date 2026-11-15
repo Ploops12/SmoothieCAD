@@ -31,10 +31,11 @@ struct InputKey final {
     FeatureParameters parameters;
     DocumentId body;
     std::uint32_t version;
-    SketchProblem sketch;
-    double depth;
+    std::optional<SketchProblem> sketch;
+    double length;
     double tolerance;
     std::shared_ptr<OwnedShape> input;
+    std::vector<std::uint32_t> edges;
     friend bool operator==(const InputKey&, const InputKey&) = default;
 };
 
@@ -158,6 +159,24 @@ std::optional<DocumentId> source_entity(const PersistentReference& reference) {
     return {};
 }
 
+std::optional<ReferenceResolution> source_reference_issue(const Document& document,
+                                                         const FeatureDefinition& creator,
+                                                         const PersistentReference& reference) {
+    if (const auto source = source_entity(reference)) {
+        const auto sketch = feature_sketch(creator);
+        if (!sketch) {
+            return ReferenceResolution{ReferenceState::Ambiguous, {},
+                "Sketch-source construction key is not defined by its creator feature; select a replacement to repair"};
+        }
+        const auto& entities = document.sketch(*sketch).problem.entities;
+        if (std::ranges::none_of(entities, [&](const auto& entity) { return entity.id == *source; })) {
+            return ReferenceResolution{ReferenceState::Deleted, {},
+                "Referenced source sketch entity was deleted; select a replacement to repair"};
+        }
+    }
+    return {};
+}
+
 } // namespace
 
 struct FeatureEvaluator::Impl final {
@@ -240,38 +259,79 @@ EvaluationReport FeatureEvaluator::evaluate(const Document& document) {
                 try {
                     const auto input = feature_input(feature);
                     const auto input_shape = input ? current.at(input->to_string()) : nullptr;
-                    const auto depth = document.length_value(feature_depth(feature));
+                    const auto length = document.length_value(feature_length(feature));
                     // Resolve/validate dimensions before testing the cache:
                     // canonical stored zeros are not evaluated solver inputs.
                     // Invalid parameter ranges must fail, not reuse old solids.
-                    auto profile = document.evaluated_sketch(feature_sketch(feature));
-                    InputKey key{feature.parameters, feature.body, feature.version, profile, depth, state.tolerance, input_shape};
+                    std::optional<SketchProblem> profile;
+                    if (const auto sketch = feature_sketch(feature)) profile = document.evaluated_sketch(*sketch);
+                    const auto* fillet = std::get_if<FilletFeature>(&feature.parameters);
+                    std::vector<std::uint32_t> edge_indices;
+                    if (fillet) {
+                        if (!std::isfinite(length) || length <= 0) throw std::runtime_error("Fillet radius must be finite and positive");
+                        std::unordered_set<std::uint32_t> selected_edges;
+                        for (const auto& edge : fillet->edges) {
+                            const auto context = "Fillet " + id + " edge '" + edge.anchor.key
+                                + "' from feature " + edge.anchor.feature.to_string() + ": ";
+                            if (!current.contains(edge.anchor.feature.to_string())) {
+                                throw std::runtime_error(context + "reference creator has no current valid result");
+                            }
+                            const auto& creator = document.feature(edge.anchor.feature);
+                            if (const auto issue = source_reference_issue(document, creator, edge)) {
+                                throw std::runtime_error(context + issue->diagnostic);
+                            }
+                            // The requested region belongs to this operation's
+                            // input, not the final body/previous evaluation report.
+                            const auto resolution = input_shape->references->resolve(TopologyKind::Edge, edge.anchor);
+                            if (resolution.state != ReferenceState::Resolved || resolution.candidates.size() != 1
+                                    || resolution.candidates.front().kind != TopologyKind::Edge) {
+                                throw std::runtime_error(context + "requires exactly one resolved EDGE; " + resolution.diagnostic);
+                            }
+                            const auto index = resolution.candidates.front().index;
+                            if (!selected_edges.insert(index).second) {
+                                throw std::runtime_error(context + "different references resolve to the same input edge; repair the selection");
+                            }
+                            edge_indices.push_back(index);
+                        }
+                    }
+                    // Even an otherwise identical key may not bypass current
+                    // source/reference validation above after an upstream edit.
+                    InputKey key{feature.parameters, feature.body, feature.version, profile, length,
+                                 state.tolerance, input_shape, edge_indices};
                     if (cached.key && *cached.key == key && cached.shape) {
                         current.emplace(id, cached.shape);
                         evaluation.reused = true;
                         evaluation.sketch_report = cached.sketch_report;
                         ++report.reused_count;
                     } else {
-                        evaluation.sketch_report = solver->solve(profile);
-                        const auto solve_state = evaluation.sketch_report->state;
-                        if (solve_state == SketchSolveState::Conflicting || solve_state == SketchSolveState::Failed) {
-                            throw std::runtime_error("Profile sketch did not solve; repair its reported constraints");
-                        }
                         // A cached ancestor may belong to an earlier adapter
-                        // with the same restored tolerance. Keep each Boolean's
-                        // operands inside that adapter's handle namespace.
+                        // with the same restored tolerance. Keep each operation
+                        // inside its input adapter's handle namespace.
                         auto operation_kernel = input_shape ? input_shape->kernel : state.kernel;
-                        const auto construction = extrude(*operation_kernel, profile, depth, state.tolerance);
-                        auto tool = state.own(operation_kernel, construction.handle, feature.id, document.revision());
-                        tool->references = std::make_shared<TopologyReferences>(name_profile(operation_kernel->topology(tool->handle), construction, feature.id));
-                        auto result = tool;
-                        if (input_shape) {
-                            result = state.own(operation_kernel, operation_kernel->subtract(input_shape->handle, tool->handle), feature.id, document.revision());
-                            if (operation_kernel->volume_mm3(result->handle) >= operation_kernel->volume_mm3(input_shape->handle)) {
-                                throw std::runtime_error("Subtraction did not remove material");
-                            }
+                        std::shared_ptr<OwnedShape> result;
+                        if (fillet) {
+                            result = state.own(operation_kernel,
+                                operation_kernel->fillet(input_shape->handle, edge_indices, length), feature.id, document.revision());
                             result->references = std::make_shared<TopologyReferences>(TopologyReferences::operation(
-                                operation_kernel->topology(result->handle), *input_shape->references, *tool->references, feature.id));
+                                operation_kernel->topology(result->handle), *input_shape->references, feature.id));
+                        } else {
+                            evaluation.sketch_report = solver->solve(*profile);
+                            const auto solve_state = evaluation.sketch_report->state;
+                            if (solve_state == SketchSolveState::Conflicting || solve_state == SketchSolveState::Failed) {
+                                throw std::runtime_error("Profile sketch did not solve; repair its reported constraints");
+                            }
+                            const auto construction = extrude(*operation_kernel, *profile, length, state.tolerance);
+                            auto tool = state.own(operation_kernel, construction.handle, feature.id, document.revision());
+                            tool->references = std::make_shared<TopologyReferences>(name_profile(operation_kernel->topology(tool->handle), construction, feature.id));
+                            result = tool;
+                            if (input_shape) {
+                                result = state.own(operation_kernel, operation_kernel->subtract(input_shape->handle, tool->handle), feature.id, document.revision());
+                                if (operation_kernel->volume_mm3(result->handle) >= operation_kernel->volume_mm3(input_shape->handle)) {
+                                    throw std::runtime_error("Subtraction did not remove material");
+                                }
+                                result->references = std::make_shared<TopologyReferences>(TopologyReferences::operation(
+                                    operation_kernel->topology(result->handle), *input_shape->references, *tool->references, feature.id));
+                            }
                         }
                         cached.key = std::move(key);
                         cached.shape = std::move(result);
@@ -346,12 +406,7 @@ ReferenceResolution FeatureEvaluator::resolve_reference(const Document& document
     if (body == impl_->report->bodies.end() || body->state != EvaluationState::UpToDate) {
         return {ReferenceState::Unavailable, {}, "Requested body has no current result at this history position"};
     }
-    if (const auto source = source_entity(reference)) {
-        const auto& entities = document.sketch(feature_sketch(*creator)).problem.entities;
-        if (std::ranges::none_of(entities, [&](const auto& entity) { return entity.id == *source; })) {
-            return {ReferenceState::Deleted, {}, "Referenced source sketch entity was deleted; select a replacement to repair"};
-        }
-    }
+    if (const auto issue = source_reference_issue(document, *creator, reference)) return *issue;
     return impl_->displays.at(reference.body.to_string())->references->resolve(reference.kind, reference.anchor);
 }
 
