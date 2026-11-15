@@ -6,7 +6,7 @@ The solver source is the FreeCAD `src/Mod/Sketcher/App/planegcs/` subtree at com
 
 The pinned snapshot predates [upstream pointer-ordering concern #33399](https://github.com/FreeCAD/FreeCAD/issues/33399). The adapter allocates unknown parameters contiguously and tests repeated solves, but that is not a claim of general solver determinism or an upstream fix. Broader determinism and numerical stress cases remain part of sketch acceptance.
 
-Build-time source acquisition, compilation and cleanup belong to CMake. Nothing in the installed addon downloads solver code, installs packages or compiles libraries at runtime. The current addon ZIP is still a development artifact: runtime-library relocation/bundling and complete dependency redistribution artifacts remain incomplete.
+Build-time source acquisition, compilation and cleanup belong to CMake. Nothing in the installed addon downloads solver code, installs packages or compiles libraries at runtime. The [runtime bundle and source companion](runtime-packaging.md) now include private libraries/resources, actual notices and complete solver/project relink inputs, including the compatibility files. Installed distribution binaries and pinned upstream source baselines are identified separately; no blanket redistribution-compliance determination is claimed.
 
 ## Adapter boundary
 

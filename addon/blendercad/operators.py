@@ -32,7 +32,7 @@ class CadOperator:
     @classmethod
     def poll(cls, context):
         from . import sketch_editor
-        return (sketch_editor.active is None and context.scene is not None
+        return (p._native is not None and sketch_editor.active is None and context.scene is not None
                 and bool(context.scene.blendercad_document_snapshot) and context.mode == "OBJECT")
 
     def execute(self, context):

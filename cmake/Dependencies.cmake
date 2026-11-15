@@ -36,6 +36,7 @@ target_include_directories(blendercad_solver_headers SYSTEM INTERFACE
     "${blendercad_eigen_SOURCE_DIR}" "${blendercad_boost_SOURCE_DIR}"
 )
 
+set(OpenCASCADE_FOUND FALSE)
 if(BLENDERCAD_USE_SYSTEM_DEPENDENCIES)
     find_package(OpenCASCADE 7.9.3 EXACT CONFIG QUIET)
 endif()
@@ -84,6 +85,7 @@ if(NOT OpenCASCADE_FOUND)
             -DCMAKE_EXPORT_PACKAGE_REGISTRY:BOOL=OFF
             "-DINSTALL_DIR_LIB:STRING=lib"
             "-DINSTALL_DIR_INCLUDE:STRING=include/opencascade"
+            "-DINSTALL_DIR_RESOURCE:PATH=share/opencascade/resources"
             "-DBUILD_ADDITIONAL_TOOLKITS:STRING=TKPrim|TKBool|TKFillet|TKMesh|TKDESTEP"
             -DBUILD_LIBRARY_TYPE:STRING=Shared
             -DBUILD_DOC_Overview:BOOL=OFF -DBUILD_SAMPLES_QT:BOOL=OFF -DBUILD_Inspector:BOOL=OFF
@@ -91,6 +93,8 @@ if(NOT OpenCASCADE_FOUND)
         BUILD_BYPRODUCTS ${_occt_byproducts}
     )
     set(OpenCASCADE_INCLUDE_DIR "${_occt_prefix}/include/opencascade")
+    set(OpenCASCADE_RESOURCE_DIR "${_occt_prefix}/share/opencascade/resources")
+    set(OpenCASCADE_LIBRARY_DIR "${_occt_prefix}/lib")
     file(MAKE_DIRECTORY "${OpenCASCADE_INCLUDE_DIR}")
     foreach(_library IN LISTS _occt_libraries)
         add_library(${_library} SHARED IMPORTED GLOBAL)
@@ -114,6 +118,10 @@ if(_local_dependency_cache)
 endif()
 
 function(blendercad_resolve_pybind11)
+    # pybind11 writes a cached FOUND result. It is not evidence that this fresh
+    # configure has defined its targets/functions, especially after source-mode
+    # rebuilds or switching between installed and pinned dependencies.
+    set(pybind11_FOUND FALSE)
     if(BLENDERCAD_USE_SYSTEM_DEPENDENCIES)
         find_package(pybind11 3.1.0 EXACT CONFIG QUIET)
     endif()
@@ -127,4 +135,30 @@ function(blendercad_resolve_pybind11)
         set(PYBIND11_TEST OFF CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(blendercad_pybind11)
     endif()
+endfunction()
+
+# Corresponding rebuild materials are build artifacts too. Even an installed
+# binary package needs pinned upstream sources/notices for its companion archive.
+# Do not configure a second copy of either dependency in the main build graph.
+function(blendercad_distribution_sources)
+    FetchContent_Declare(blendercad_occt
+        GIT_REPOSITORY https://github.com/Open-Cascade-SAS/OCCT.git
+        GIT_TAG a016080bf6738d6aeae020badee4e888ad1540a5
+        GIT_SUBMODULES "" UPDATE_DISCONNECTED TRUE
+        SOURCE_SUBDIR blendercad_distribution_only
+    )
+    FetchContent_Declare(blendercad_pybind11
+        GIT_REPOSITORY https://github.com/pybind/pybind11.git
+        GIT_TAG 97bf890db679505a14dfe547a5e77bb2bd05dc90
+        GIT_SUBMODULES "" UPDATE_DISCONNECTED TRUE
+        SOURCE_SUBDIR blendercad_distribution_only
+    )
+    FetchContent_MakeAvailable(blendercad_occt blendercad_pybind11)
+    foreach(_dependency IN ITEMS occt pybind11 eigen boost)
+        FetchContent_GetProperties(blendercad_${_dependency} SOURCE_DIR _source)
+        if(NOT IS_DIRECTORY "${_source}")
+            message(FATAL_ERROR "Distribution source is absent: ${_dependency}; populate before offline packaging")
+        endif()
+        set(BLENDERCAD_DISTRIBUTION_${_dependency}_SOURCE "${_source}" PARENT_SCOPE)
+    endforeach()
 endfunction()

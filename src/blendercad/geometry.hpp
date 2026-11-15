@@ -49,4 +49,9 @@ public:
 [[nodiscard]] std::unique_ptr<GeometryAdapter> make_occt_geometry_adapter(double geometric_budget_mm = 0.001);
 [[nodiscard]] const char* occt_version() noexcept;
 
+// Configure packaged exchange resources, independently of Blender and saved
+// documents. Exchange calls scope and restore the process environment.
+void configure_exchange_resources(const std::string& directory);
+[[nodiscard]] std::string exchange_resource_directory();
+
 } // namespace blendercad

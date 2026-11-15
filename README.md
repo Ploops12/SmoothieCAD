@@ -23,7 +23,9 @@ cmake --build build --target package_addon
 cmake --build build --target check
 ```
 
-Install `build/dist/blendercad-0.1.0.zip` through Blender Preferences → Get Extensions → dropdown → Install from Disk. This first package contains a Linux CPython 3.14 extension and is not portable to other platforms or Python ABIs.
+Install `build/dist/blendercad-0.1.0.zip` through Blender Preferences → Get Extensions → dropdown → Install from Disk. It includes a private OCCT/runtime bundle and exchange resources; it needs no host OCCT installation, runtime downloads or user compilation. It targets this Linux CPython 3.14/Blender ABI, not other platforms or older Linux distributions.
+
+See [Runtime packaging](docs/runtime-packaging.md) for manifests, ABI requirements, notices/source companions, relocation verification and offline rebuilding.
 
 See [Build and dependencies](docs/build-and-dependencies.md) for dependency discovery, platform constraints, and the current integration boundary.
 

@@ -13,14 +13,19 @@ bl_info = {
 }
 
 try:
+    from . import runtime as _runtime
+    _runtime_root = _runtime.prepare()
     from . import _native
-except ImportError:
+    _runtime.configure(_native, _runtime_root)
+    _native_error = ""
+except (ImportError, OSError, RuntimeError, ValueError) as _error:
     _native = None
+    _native_error = str(_error)
 
 
 def _native_status() -> str:
     if _native is None:
-        return "Native module is not installed"
+        return f"Native module unavailable: {_native_error}"
     return f"Native core {_native.blendercad_version()} · OCCT {_native.occt_version()}"
 
 

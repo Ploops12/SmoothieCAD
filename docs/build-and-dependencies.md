@@ -2,7 +2,7 @@
 
 ## Pipeline
 
-Build-host prerequisites are a C++20 compiler/build tool, CMake 3.25+, Git, the CPython 3.14 development SDK, and Blender 5.2.3 for acceptance checks. These are the host toolchain. Native library acquisition, compilation, addon packaging, checks and cleanup are orchestrated by CMake; do not manually download libraries or run a separate provisioning script.
+Build-host prerequisites are a C++20 compiler/build tool, CMake 3.25+, Git, Linux `readelf`, the CPython 3.14 development SDK, and Blender 5.2.3 for acceptance checks. These are the host toolchain. Native library acquisition, compilation, addon packaging, checks and cleanup are orchestrated by CMake; do not manually download libraries or run a separate provisioning script.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -23,7 +23,9 @@ and temporary files.
 
 The first configure acquires pinned build dependencies. Subsequent builds reuse the build-local cache. Matching installed OCCT 7.9.3 and pybind11 3.1.0 packages are preferred by default; if absent, CMake fetches and builds their pinned source revisions. `-DBLENDERCAD_USE_SYSTEM_DEPENDENCIES=OFF` forces those source paths. The solver's Eigen/Boost header dependencies are always acquired at the recorded versions, and PlaneGCS itself is vendored at a fixed upstream revision. `cmake/Dependencies.cmake` is the dependency lock/build entry point. It verifies archive hashes or pinned Git object identities; `cmake/PlaneGCS.cmake` checks the vendored source hashes.
 
-No dependency acquisition or compilation runs inside the addon. The package is written to `build/dist/blendercad-0.1.0.zip`. Its binary currently targets this Linux CPython 3.14 ABI. Runtime library bundling/relocation and complete redistribution artifacts remain unfinished, so this ZIP is still a development artifact requiring the build machine's OCCT runtime. Do not treat a successful build as installed-package acceptance on a different machine.
+No dependency acquisition or compilation runs inside the addon. `package_addon` writes `build/dist/blendercad-0.1.0.zip` with private libraries/resources and `blendercad-0.1.0-sources.tar.gz` with source/relink materials. Pinned OCCT/pybind11 source baselines are acquired for this companion even when installed binaries are selected. The ZIP no longer requires host OCCT, but still targets this Linux/Blender/CPython ABI. See [runtime packaging](runtime-packaging.md) for the manifest, explicit platform exclusions, notice mappings and installed-binary/source provenance distinction. This is not portability to older distributions.
+
+With `bwrap` installed, `cmake --build build --target check_relocation` masks host OCCT libraries/resources and tests relocated installation plus missing-library negative controls. The heavier `check_source_rebuild` target builds the source companion offline, including OCCT. Both checks and their cleanup belong to CMake.
 
 To use non-standard host SDK/package locations, use `Python_ROOT_DIR`, `CMAKE_PREFIX_PATH`, `OpenCASCADE_DIR`, and `pybind11_DIR`. CMake does not silently use another OCCT, Python or pybind11 version. For an already populated tree, configure with `-DBLENDERCAD_OFFLINE=ON`; an empty offline cache cannot satisfy missing dependencies. Standard `FETCHCONTENT_SOURCE_DIR_<NAME>` overrides can use pre-populated source trees when offline builds need explicit local inputs.
 
@@ -58,10 +60,10 @@ Full cleanup requires an out-of-source build marked by this project and refuses 
 
 Filleting links the existing OCCT `TKFillet` toolkit; both installed-library and
 source-build dependency lists include it. This does not introduce another library
-project or a runtime download. The source-build fillet path has not yet received
-the current feature acceptance suite.
+project or a runtime download. `check_source_rebuild` exercises this path using
+only the extracted source companion and host toolchain.
 
-The Linux dependency-lifecycle verification exercised matching installed packages and forced CMake source builds of OCCT/pybind11; both passed the four then-existing CTest groups. A normal `clean` followed by `check` also passed without reacquiring cached sources. The actual dependency-purge target and full-tree script were exercised in a disposable project build, including preservation of external source inputs. The current `check` target additionally covers document/sketch/feature snapshots and feature evaluation/history. These checks do not establish portability to other platforms or final runtime-library packaging.
+The earlier Linux dependency-lifecycle verification exercised matching installed packages and forced CMake source builds of OCCT/pybind11. A normal `clean` followed by `check` passed without reacquiring cached sources. The actual dependency-purge target and full-tree script were exercised in a disposable project build, including preservation of external source inputs. Current checks additionally cover document/sketch/feature evaluation and packaged runtime relocation. These checks do not establish portability to other platforms or full bracket acceptance.
 
 ## Layer ownership
 

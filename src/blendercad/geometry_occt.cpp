@@ -47,6 +47,8 @@
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <filesystem>
+#include <cstdlib>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -56,6 +58,50 @@ namespace {
 
 // STEP sessions may initialize shared OCCT exchange registries.
 std::mutex exchange_mutex;
+std::filesystem::path exchange_resources;
+
+class ExchangeEnvironment final {
+public:
+    ExchangeEnvironment() {
+        if (exchange_resources.empty()) return; // Raw native-service development.
+        try {
+            const auto root = exchange_resources.string();
+            put("CSF_OCCTResourcePath", root);
+            for (const auto name : {"STEP", "IGES"}) {
+                put(std::string("CSF_") + name + "Defaults", (exchange_resources / "XSTEPResource").string());
+                put(std::string("CSF_") + name + "UserDefaults", "");
+            }
+            put("CSF_XSMessage", (exchange_resources / "XSMessage").string());
+            put("CSF_SHMessage", (exchange_resources / "SHMessage").string());
+            for (const auto name : {"Standard", "StandardLite", "XCAF", "Plugin"}) {
+                put(std::string("CSF_") + name + "Defaults", (exchange_resources / "StdResource").string());
+                put(std::string("CSF_") + name + "UserDefaults", "");
+            }
+            put("CSF_MIGRATION_TYPES", (exchange_resources / "StdResource" / "MigrationSheet.txt").string());
+        } catch (...) { restore(); throw; }
+    }
+    ~ExchangeEnvironment() { restore(); }
+    ExchangeEnvironment(const ExchangeEnvironment&) = delete;
+    ExchangeEnvironment& operator=(const ExchangeEnvironment&) = delete;
+private:
+    static bool assign(const std::string& name, const std::optional<std::string>& value) noexcept {
+#ifdef _WIN32
+        return _putenv_s(name.c_str(), value ? value->c_str() : "") == 0;
+#else
+        return (value ? setenv(name.c_str(), value->c_str(), 1) : unsetenv(name.c_str())) == 0;
+#endif
+    }
+    void put(std::string name, std::string value) {
+        const auto previous = std::getenv(name.c_str());
+        saved_.emplace_back(name, previous ? std::optional<std::string>{previous} : std::nullopt);
+        if (!assign(name, value)) throw std::runtime_error("could not configure packaged exchange resources");
+    }
+    void restore() noexcept {
+        for (auto it = saved_.rbegin(); it != saved_.rend(); ++it) (void)assign(it->first, it->second);
+        saved_.clear();
+    }
+    std::vector<std::pair<std::string, std::optional<std::string>>> saved_;
+};
 
 gp_Pnt point_in_plane(Point2 point, const SketchPlane& plane) {
     if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
@@ -439,6 +485,7 @@ public:
     void write_step(ShapeHandle handle, const std::string& path) const override {
         const auto shape = lookup(handle);
         std::lock_guard lock(exchange_mutex);
+        const ExchangeEnvironment environment;
         STEPControl_Writer writer;
         DESTEP_Parameters parameters;
         parameters.WriteUnit = UnitsMethods_LengthUnit_Millimeter;
@@ -450,6 +497,7 @@ public:
 
     ShapeHandle read_step(const std::string& path) override {
         std::lock_guard lock(exchange_mutex);
+        const ExchangeEnvironment environment;
         STEPControl_Reader reader;
         if (reader.ReadFile(path.c_str()) != IFSelect_RetDone) {
             throw std::runtime_error("could not read STEP file: " + path);
@@ -769,6 +817,23 @@ std::unique_ptr<GeometryAdapter> make_occt_geometry_adapter(double geometric_bud
 
 const char* occt_version() noexcept {
     return OCC_VERSION_COMPLETE;
+}
+
+void configure_exchange_resources(const std::string& directory) {
+    const auto root = std::filesystem::canonical(directory);
+    for (const auto relative : {"XSTEPResource/STEP", "XSMessage/XSTEP.us", "SHMessage/SHAPE.us",
+                               "StdResource/Standard", "StdResource/MigrationSheet.txt"}) {
+        if (!std::filesystem::is_regular_file(root / relative)) {
+            throw std::invalid_argument("packaged exchange resource is missing: " + std::string(relative));
+        }
+    }
+    std::lock_guard lock(exchange_mutex);
+    exchange_resources = root;
+}
+
+std::string exchange_resource_directory() {
+    std::lock_guard lock(exchange_mutex);
+    return exchange_resources.string();
 }
 
 } // namespace blendercad

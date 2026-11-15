@@ -36,6 +36,8 @@ PYBIND11_MODULE(_native, module) {
     });
     module.def("blendercad_version", [] { return BLENDERCAD_VERSION; });
     module.def("occt_version", &blendercad::occt_version);
+    module.def("configure_exchange_resources", &blendercad::configure_exchange_resources);
+    module.def("exchange_resource_directory", &blendercad::exchange_resource_directory);
     py::register_exception_translator([](std::exception_ptr exception) {
         try {
             if (exception) std::rethrow_exception(exception);

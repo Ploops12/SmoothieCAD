@@ -99,6 +99,7 @@ if(BLENDERCAD_BUILD_PYTHON)
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:_native>"
         VERBATIM
     )
+    include(cmake/RuntimePackaging.cmake)
     if(BUILD_TESTING)
         find_program(BLENDERCAD_BLENDER_EXECUTABLE NAMES blender REQUIRED)
         add_test(NAME native_geometry
@@ -147,6 +148,30 @@ if(BLENDERCAD_BUILD_PYTHON)
         set_tests_properties(native_geometry native_sketch document_snapshot native_features native_topology native_references native_queries native_query_guards native_parameters native_sketch_parameters native_fillets blender_foundation blender_solids blender_capabilities blender_references blender_selection blender_lifecycle blender_parameters blender_sketch_parameters blender_sketch_editor blender_fillets highlight_arrays PROPERTIES
             ENVIRONMENT "ALSOFT_DRIVERS=null"
         )
+        find_program(BLENDERCAD_BWRAP_EXECUTABLE NAMES bwrap)
+        add_test(NAME runtime_staging
+            COMMAND "${Python_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/runtime_staging.py"
+                --cmake "${CMAKE_COMMAND}" --script "${CMAKE_SOURCE_DIR}/cmake/StageRuntime.cmake"
+                --module "$<TARGET_FILE:_native>" --resource-dir "${OpenCASCADE_RESOURCE_DIR}"
+                --library-dir "$<TARGET_FILE_DIR:TKernel>" --work-dir "${CMAKE_BINARY_DIR}/runtime-staging-tests")
+        if(BLENDERCAD_BWRAP_EXECUTABLE)
+            set(_relocation_command "${Python_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/runtime_relocation.py"
+                --blender "${BLENDERCAD_BLENDER_EXECUTABLE}" --bwrap "${BLENDERCAD_BWRAP_EXECUTABLE}"
+                --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
+                --output-dir "${CMAKE_BINARY_DIR}/relocation-tests"
+                --script "${CMAKE_SOURCE_DIR}/tests/blender_relocation.py"
+                --occt-library-dir "${OpenCASCADE_LIBRARY_DIR}")
+            add_test(NAME runtime_relocation COMMAND ${_relocation_command})
+            set_tests_properties(runtime_relocation PROPERTIES ENVIRONMENT "ALSOFT_DRIVERS=null")
+            add_custom_target(check_relocation COMMAND ${_relocation_command}
+                DEPENDS package_addon USES_TERMINAL VERBATIM)
+        endif()
+        add_custom_target(check_source_rebuild
+            COMMAND "${Python_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/source_rebuild.py"
+                --cmake "${CMAKE_COMMAND}" --blender "${BLENDERCAD_BLENDER_EXECUTABLE}"
+                --archive "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}-sources.tar.gz"
+                --output-dir "${CMAKE_BINARY_DIR}/source-rebuild-tests"
+            DEPENDS package_addon USES_TERMINAL VERBATIM)
         add_custom_target(check
             COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -C "$<CONFIG>"
             WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
@@ -191,15 +216,6 @@ if(BLENDERCAD_BUILD_PYTHON)
         endif()
     endif()
 
-    add_custom_target(package_addon
-        COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/package_addon.py"
-            --addon-dir "${CMAKE_CURRENT_SOURCE_DIR}/addon/blendercad"
-            --native-module "$<TARGET_FILE:_native>"
-            --output "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
-        DEPENDS _native
-        COMMENT "Packaging BlenderCAD ${PROJECT_VERSION} addon"
-        VERBATIM
-    )
 endif()
 
 install(TARGETS blendercad_core
