@@ -25,9 +25,12 @@ def selected(context, operation):
     return document, hosts
 
 
-def commit(scene, document, convert_hosts=()):
+def commit(scene, document, convert_hosts=(), *, sketch_session=None, placements=None):
+    from . import sketch_editor
+    sketch_editor.authorize_commit(scene, sketch_session)
     previous_runtime = p.runtime(scene)
     prepared = p.prepare(scene, document, convert_hosts)
+    prepared.host_placements = placements or {}
     previous = scene.blendercad_document_snapshot
     try:
         scene.blendercad_document_snapshot = p.serialize(document)
@@ -94,6 +97,41 @@ def set_sketch_dimension(context, sketch_id, constraint_id, value):
     document = p.read_document(context.scene)
     document.set_sketch_dimension(sketch_id, constraint_id, value)
     return commit(context.scene, document)
+
+
+def sketch_placement(context, document, sketch_id=""):
+    """Explicit edit/creation frame, not ownership stored in a second model.
+
+    Unused sketches can be worked in the active Solid's local frame. A consumed
+    sketch uses that frame only if the active Solid is one of its consumers.
+    With no matching active Solid, the document's origin frame is used.
+    """
+    from mathutils import Matrix
+    host = p.host_for(context.active_object)
+    consumers = [item for item in document.features if item.sketch_id == sketch_id] if sketch_id else []
+    if (host is not None and host.get(p.DOC) == document.id
+            and (not consumers or any(item.body_id == host.get(p.BODY) for item in consumers))):
+        from .selection import _rigid
+        context.view_layer.update()
+        _rigid(host)
+        return host, host.matrix_world.copy()
+    return None, Matrix.Identity(4)
+
+
+def extrude_sketch(context, sketch_id, depth, input_feature_id=""):
+    capabilities.require_capability(context.selected_objects, "edit_definition")
+    document = p.read_document(context.scene)
+    if document.rollback_before is not None:
+        raise ValueError("Return to the end of history before creating a feature")
+    _host, placement = sketch_placement(context, document, sketch_id)
+    if input_feature_id:
+        feature = document.add_subtractive_extrusion("Sketch cut", input_feature_id, sketch_id, depth)
+    else:
+        feature = document.add_extrusion("Sketch extrusion", sketch_id, depth)
+    body = document.get_feature(feature).body_id
+    commit(context.scene, document, placements={body: placement} if not input_feature_id else None)
+    _select(context, [body])
+    return feature
 
 
 def set_parameter(context, name, value, unit=None, expression=None):

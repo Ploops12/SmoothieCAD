@@ -35,6 +35,8 @@ See [Parameter expressions](docs/parameter-expressions.md) for dimensional arith
 
 See [Sketch dimensions](docs/sketch-dimensions.md) for parameter bindings, numeric dimension editing, solver resolution and schema-6 persistence.
 
+See [Interactive sketches](docs/interactive-sketches.md) for viewport drawing/constraints/dragging, transactional confirmation, and sketch extrusion/cuts.
+
 See [Features and evaluation](docs/features-and-evaluation.md) for body ownership, dependency history, caching, failures and query/export guards.
 
 See [Managed Solid presentation](docs/solid-integration.md) for the Blender workflow, picking/materials, commands, undo and documented integration gaps.

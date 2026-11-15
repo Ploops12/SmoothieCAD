@@ -11,11 +11,14 @@ cmake --build build --target check -j2
 ```
 
 On Linux with the optional host tool `xvfb-run` installed, CMake additionally
-provides `cmake --build build --target check_solid_ui`. This isolates a Blender
-window, configuration and generated files under the build tree and checks
-actual event-queue routing/undo. It is separate from the headless `check` target;
-see [Solid integration](solid-integration.md) for coverage and limits. Normal
-`clean` also removes its logs and temporary files.
+provides `cmake --build build --target check_solid_ui` and
+`cmake --build build --target check_sketch_ui`. These isolate Blender windows,
+configuration and generated files under the build tree and check actual
+event-queue routing/undo, sketch drawing/constraints and preview cancellation.
+They are separate from the headless `check` target; see
+[Solid integration](solid-integration.md) and [interactive sketches](interactive-sketches.md)
+for coverage and limits. Normal `clean` removes both targets' logs, screenshots
+and temporary files.
 
 The first configure acquires pinned build dependencies. Subsequent builds reuse the build-local cache. Matching installed OCCT 7.9.3 and pybind11 3.1.0 packages are preferred by default; if absent, CMake fetches and builds their pinned source revisions. `-DBLENDERCAD_USE_SYSTEM_DEPENDENCIES=OFF` forces those source paths. The solver's Eigen/Boost header dependencies are always acquired at the recorded versions, and PlaneGCS itself is vendored at a fixed upstream revision. `cmake/Dependencies.cmake` is the dependency lock/build entry point. It verifies archive hashes or pinned Git object identities; `cmake/PlaneGCS.cmake` checks the vendored source hashes.
 

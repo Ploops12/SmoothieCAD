@@ -109,6 +109,7 @@ kind, domain/unit rejection, snapshot alternatives/versions, no-op/overflow,
 reference preservation, selective recomputation, blocked dependents, last-valid
 failure/recovery, arbitrary planes, analytic volume/radius, duplication,
 save/reopen and undo/redo. `check_solid_ui` confirms/cancels the real dimension
-dialog in a Blender window. These are numeric sketch-editing controls, not yet
-interactive sketch drawing, dimension dragging, geometric selection within a
-sketch or a complete mechanical-bracket acceptance workflow.
+dialog in a Blender window. The complementary [interactive editor](interactive-sketches.md)
+now provides viewport drawing, constraint selection and point/dimension dragging
+through these same definitions. Complete mechanical-bracket acceptance remains
+pending.

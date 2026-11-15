@@ -31,7 +31,9 @@ class CadOperator:
 
     @classmethod
     def poll(cls, context):
-        return context.scene is not None and bool(context.scene.blendercad_document_snapshot) and context.mode == "OBJECT"
+        from . import sketch_editor
+        return (sketch_editor.active is None and context.scene is not None
+                and bool(context.scene.blendercad_document_snapshot) and context.mode == "OBJECT")
 
     def execute(self, context):
         try:
@@ -66,6 +68,29 @@ class BLENDERCAD_OT_add_rectangle_solid(CadOperator, bpy.types.Operator):
     def run(self, context):
         commands.add_rectangle(context, self.width_mm, self.height_mm, self.depth_mm,
                                self.width_parameter, self.height_parameter)
+        frame_solids(context, p.selected_hosts(context))
+
+
+class BLENDERCAD_OT_extrude_sketch(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.extrude_sketch"
+    bl_label = "Extrude CAD Sketch"
+    bl_description = "Create a body or cut the selected Solid using a saved sketch profile"
+    sketch_id: StringProperty(options={"HIDDEN"})
+    depth_mm: FloatProperty(name="Depth (mm)", default=5, min=0.001)
+    parameter: StringProperty(name="Depth parameter", description="Optional named length parameter")
+    cut: BoolProperty(name="Cut selected Solid", default=False)
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def run(self, context):
+        input_id = ""
+        if self.cut:
+            document, hosts = commands.selected(context, "edit_definition")
+            if len(hosts) != 1:
+                raise ValueError("Select exactly one Solid to cut")
+            input_id = next(item.id for item in reversed(document.features) if item.body_id == hosts[0][p.BODY])
+        commands.extrude_sketch(context, self.sketch_id, self.parameter if self.parameter else self.depth_mm, input_id)
         frame_solids(context, p.selected_hosts(context))
 
 
@@ -257,7 +282,8 @@ class BLENDERCAD_OT_pick_solid(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return (p._native is not None and context.scene is not None
+        from . import sketch_editor
+        return (sketch_editor.active is None and p._native is not None and context.scene is not None
                 and bool(context.scene.blendercad_document_snapshot)
                 and context.area is not None and context.area.type == "VIEW_3D"
                 and context.region is not None and context.region.type == "WINDOW" and context.mode == "OBJECT")
@@ -278,7 +304,7 @@ class BLENDERCAD_OT_pick_solid(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (BLENDERCAD_OT_add_rectangle_solid, BLENDERCAD_OT_recompute, BLENDERCAD_OT_set_sketch_dimension,
+_classes = (BLENDERCAD_OT_add_rectangle_solid, BLENDERCAD_OT_extrude_sketch, BLENDERCAD_OT_recompute, BLENDERCAD_OT_set_sketch_dimension,
             BLENDERCAD_OT_set_feature_depth, BLENDERCAD_OT_parameter,
             BLENDERCAD_OT_duplicate_solid, BLENDERCAD_OT_frame_solid, BLENDERCAD_OT_delete_solid,
             BLENDERCAD_OT_convert_to_regular_mesh, BLENDERCAD_OT_pick_solid,

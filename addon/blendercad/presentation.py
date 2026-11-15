@@ -134,6 +134,7 @@ class Prepared:
     evaluator: object
     conversions: list
     new_materials: list = field(default_factory=list)
+    host_placements: dict = field(default_factory=dict)
 
 
 def discard_prepared(prepared):
@@ -444,6 +445,8 @@ def _publish(scene, document, prepared, journal):
             host.empty_display_size = 5 * scale
             host.lock_scale = (True, True, True)
         journal.remember(host)
+        if body_id in prepared.host_placements:
+            host.matrix_world = prepared.host_placements[body_id]
         body = evaluated.get(body_id)
         display = display_for(scene, host)
         if display is not None:

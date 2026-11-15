@@ -27,6 +27,7 @@ add_custom_target(purge_dependencies
 )
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES
     "${CMAKE_BINARY_DIR}/dist" "${CMAKE_BINARY_DIR}/addon" "${CMAKE_BINARY_DIR}/ui-tests"
+    "${CMAKE_BINARY_DIR}/sketch-ui-tests"
 )
 
 add_library(blendercad_core STATIC
@@ -135,14 +136,14 @@ if(BLENDERCAD_BUILD_PYTHON)
                 --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/blender_foundation.py"
                 -- --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
         )
-        foreach(_blendercad_check IN ITEMS blender_solids blender_capabilities blender_references blender_selection blender_lifecycle blender_parameters blender_sketch_parameters highlight_arrays)
+        foreach(_blendercad_check IN ITEMS blender_solids blender_capabilities blender_references blender_selection blender_lifecycle blender_parameters blender_sketch_parameters blender_sketch_editor highlight_arrays)
             add_test(NAME ${_blendercad_check}
                 COMMAND "${BLENDERCAD_BLENDER_EXECUTABLE}" --background --factory-startup
                     --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/${_blendercad_check}.py"
                     -- --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
             )
         endforeach()
-        set_tests_properties(native_geometry native_sketch document_snapshot native_features native_topology native_references native_queries native_query_guards native_parameters native_sketch_parameters blender_foundation blender_solids blender_capabilities blender_references blender_selection blender_lifecycle blender_parameters blender_sketch_parameters highlight_arrays PROPERTIES
+        set_tests_properties(native_geometry native_sketch document_snapshot native_features native_topology native_references native_queries native_query_guards native_parameters native_sketch_parameters blender_foundation blender_solids blender_capabilities blender_references blender_selection blender_lifecycle blender_parameters blender_sketch_parameters blender_sketch_editor highlight_arrays PROPERTIES
             ENVIRONMENT "ALSOFT_DRIVERS=null"
         )
         add_custom_target(check
@@ -153,6 +154,17 @@ if(BLENDERCAD_BUILD_PYTHON)
         )
         find_program(BLENDERCAD_XVFB_RUN_EXECUTABLE NAMES xvfb-run)
         if(BLENDERCAD_XVFB_RUN_EXECUTABLE)
+            add_custom_target(check_sketch_ui
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_blender_ui.py"
+                    --xvfb "${BLENDERCAD_XVFB_RUN_EXECUTABLE}"
+                    --blender "${BLENDERCAD_BLENDER_EXECUTABLE}"
+                    --script "${CMAKE_CURRENT_SOURCE_DIR}/tests/blender_sketch_ui.py"
+                    --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
+                    --output-dir "${CMAKE_BINARY_DIR}/sketch-ui-tests"
+                DEPENDS package_addon
+                USES_TERMINAL
+                VERBATIM
+            )
             add_custom_target(check_solid_ui
                 COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_blender_ui.py"
                     --xvfb "${BLENDERCAD_XVFB_RUN_EXECUTABLE}"

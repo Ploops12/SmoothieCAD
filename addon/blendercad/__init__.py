@@ -56,9 +56,13 @@ def _classes():
         bl_category = "BlenderCAD"
 
         def draw(self, context):
+            from . import sketch_editor
             self.layout.label(text=_native_status())
             if _native is None:
                 return
+            if sketch_editor.active is not None:
+                self.layout.label(text="Editing sketch · Enter confirm · Esc cancel")
+                self.layout.enabled = False
 
             serialized = context.scene.blendercad_document_snapshot
             if not serialized:
@@ -99,6 +103,19 @@ def _classes():
                 row.label(text=feature.name)
                 operator = row.operator("blendercad.set_feature_depth", text="Depth")
                 operator.feature_id = feature.id
+            sketch_box = self.layout.box()
+            sketch_box.label(text="Sketches")
+            row = sketch_box.row(align=True)
+            for plane in ("XY", "XZ", "YZ", "CURSOR"):
+                operator = row.operator("blendercad.edit_sketch", text="Cursor" if plane == "CURSOR" else plane)
+                operator.plane = plane
+            for sketch in document.sketches:
+                row = sketch_box.row(align=True)
+                row.label(text=sketch.name)
+                operator = row.operator("blendercad.edit_sketch", text="Edit")
+                operator.sketch_id = sketch.id
+                operator = row.operator("blendercad.extrude_sketch", text="Extrude")
+                operator.sketch_id = sketch.id
             resolutions = {entry.reference_id: entry.resolution for entry in state.report.references} if state.report and state.serialized == serialized else {}
             for reference in document.references:
                 box = self.layout.box()
@@ -187,7 +204,7 @@ _registered_classes = ()
 def register():
     import bpy
     from bpy.props import EnumProperty, StringProperty
-    from . import capabilities, highlight, lifecycle, operators, presentation
+    from . import capabilities, highlight, lifecycle, operators, presentation, sketch_editor
 
     global _registered_classes
     bpy.types.Scene.blendercad_document_snapshot = StringProperty(
@@ -207,6 +224,7 @@ def register():
         for cls in _registered_classes:
             bpy.utils.register_class(cls)
         operators.register()
+        sketch_editor.register()
         capabilities.register()
         presentation.register()
         lifecycle.register()
@@ -214,6 +232,7 @@ def register():
     except Exception:
         # Each module unregisters only the hooks it installed.
         highlight.unregister()
+        sketch_editor.unregister()
         lifecycle.unregister()
         presentation.unregister()
         capabilities.unregister()
@@ -229,10 +248,11 @@ def register():
 
 def unregister():
     import bpy
-    from . import capabilities, highlight, lifecycle, operators, presentation
+    from . import capabilities, highlight, lifecycle, operators, presentation, sketch_editor
 
     global _registered_classes
     highlight.unregister()
+    sketch_editor.unregister()
     lifecycle.unregister()
     presentation.unregister()
     capabilities.unregister()

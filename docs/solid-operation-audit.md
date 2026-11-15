@@ -48,6 +48,21 @@ The optional CMake `check_solid_ui` target verifies standard-workspace click,
 Shift-D, scale/Tab guard dispatch, confirmation cancellation and conversion undo
 through Blender's event queue. It does not cover customized key configurations.
 
+## Sketch-editor command ownership
+
+The [interactive sketch editor](interactive-sketches.md) is a modal input context,
+not mesh Edit Mode. Its S/Tab/X/G keys select sketch entities, cycle/delete CAD
+constraints and issue solver-backed sketch commands; they do not dispatch the
+Object Mode scale/Edit Mode/delete/transform operators. The editor consumes
+modelling shortcuts while allowing supported viewport navigation through.
+Other addon editors are disabled while a sketch session owns a detached draft,
+and `commands.commit` rejects non-owning publication before preparing geometry.
+Confirmation passes that ownership guard and publishes one undoable interaction.
+The isolated `check_sketch_ui` verifies native event routing, preview cancel,
+constraint cycling/deletion, extrusion and one-step undo, including rejection of
+a competing CAD command during editing. This does not extend universal veto
+coverage to arbitrary scripts or built-in Blender operators.
+
 ## Coverage limits
 
 This is a focused guard, not a universal Blender capability sandbox. It does

@@ -23,8 +23,9 @@ The sidebar exposes feature-depth edits, creation/editing of named unit-aware
 parameters, recomputation, whole-body material selection, duplication, deletion
 and **Convert to Regular Mesh**. A depth may be a literal millimetre value or a
 named length parameter, which can itself have a unit-aware arithmetic
-[expression definition](parameter-expressions.md). Interactive sketch tools,
-face-based modelling and fillets remain pending.
+[expression definition](parameter-expressions.md). The [interactive editor](interactive-sketches.md)
+adds viewport drawing/constraints/dragging and sketch-based extrusion/cuts;
+associative face-based modelling and fillets remain pending.
 Rectangle width/height and existing sketch dimensions can now bind to length
 parameters through the [dimension controls](sketch-dimensions.md); editing an
 earlier profile recomputes its affected feature chain without rewriting its IDs.
@@ -36,7 +37,8 @@ mesh publication. `commands.py` owns detached-document edits and prepares
 native results/display meshes before publishing a snapshot. UI operators call
 those commands and carry Blender `UNDO`; construction history is not the undo
 log. These synchronous paths touch Blender data only on its main thread.
-There is no asynchronous publication or interactive preview session yet.
+The interactive sketch editor keeps a detached draft and GPU overlay until
+confirmation; solid feature previews and asynchronous publication remain pending.
 
 Preparation forks the native evaluator's complete state, sharing immutable
 cached shape ownership without mutating the published cache. Display meshes
