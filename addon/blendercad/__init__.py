@@ -152,16 +152,48 @@ def _classes():
             for plane in ("XY", "XZ", "YZ", "CURSOR"):
                 operator = row.operator("blendercad.edit_sketch", text="Cursor" if plane == "CURSOR" else plane)
                 operator.plane = plane
+            sketch_box.label(text="On selected face")
+            row = sketch_box.row(align=True)
+            for reverse, label in ((True, "Into Solid"), (False, "Outward")):
+                operator = row.operator("blendercad.edit_sketch", text=label)
+                operator.plane, operator.reverse_support = "FACE", reverse
             for sketch in document.sketches:
-                row = sketch_box.row(align=True)
-                row.label(text=sketch.name)
+                entry = sketch_box.box()
+                entry.label(text=sketch.name)
+                row = entry.row(align=True)
                 operator = row.operator("blendercad.edit_sketch", text="Edit")
                 operator.sketch_id = sketch.id
                 operator = row.operator("blendercad.extrude_sketch", text="Extrude")
                 operator.sketch_id = sketch.id
-                for mode, label in (("EXTRUDE", "Preview"), ("CUT", "Preview Cut")):
+                row = entry.row(align=True)
+                for mode, label in (("EXTRUDE", "Preview Extrude"), ("CUT", "Preview Cut")):
                     operator = row.operator("blendercad.preview_feature", text=label)
                     operator.sketch_id, operator.operation = sketch.id, mode
+                support_box = entry.box()
+                row = support_box.row(align=True)
+                if any(item.sketch_id == sketch.id for item in document.features):
+                    operator = row.operator("blendercad.sketch_support_inputs", text="Support Inputs")
+                    operator.sketch_id = sketch.id
+                if sketch.support is None:
+                    operator = row.operator("blendercad.attach_sketch_support", text="Attach to Face")
+                    operator.sketch_id = sketch.id
+                else:
+                    support_box.label(text="Face support: " + document.get_feature(sketch.support.feature_id).name)
+                    operator = row.operator("blendercad.sketch_support", text="Frame")
+                    operator.sketch_id = sketch.id
+                    operator = row.operator("blendercad.detach_sketch_support", text="Detach")
+                    operator.sketch_id = sketch.id
+                    operator = support_box.operator("blendercad.repair_sketch_support", text="Repair + Resume")
+                    operator.sketch_id = sketch.id
+                    try:
+                        state.evaluator.support_plane(document, sketch.support)
+                    except (ValueError, RuntimeError, KeyError) as error:
+                        import textwrap
+                        support_box.label(text="Support unavailable · explicit repair required", icon="ERROR")
+                        for line in textwrap.wrap(str(error), width=42):
+                            support_box.label(text=line)
+                operator = support_box.operator("blendercad.delete_sketch", text="Delete Sketch")
+                operator.sketch_id = sketch.id
             resolutions = {entry.reference_id: entry.resolution for entry in state.report.references} if state.report and state.serialized == serialized else {}
             for reference in document.references:
                 box = self.layout.box()

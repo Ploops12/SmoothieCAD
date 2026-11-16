@@ -44,6 +44,16 @@ void bind_evaluation(py::module_& module) {
              "Create an isolated evaluator state sharing immutable cached geometry ownership.")
         .def("evaluate", &FeatureEvaluator::evaluate)
         .def("matches_document", &FeatureEvaluator::matches_document)
+        .def("evaluated_sketch", [](const FeatureEvaluator& evaluator, const Document& document,
+                                     const std::string& sketch) {
+            return evaluator.evaluated_sketch(document, DocumentId::parse(sketch));
+        }, py::arg("document"), py::arg("sketch_id"))
+        .def("support_plane", &FeatureEvaluator::support_plane,
+             py::arg("document"), py::arg("support"))
+        .def("planar_face", [](const FeatureEvaluator& evaluator, const Document& document,
+                                const std::string& body, std::uint32_t face_index) {
+            return evaluator.planar_face(document, DocumentId::parse(body), face_index);
+        }, py::arg("document"), py::arg("body"), py::arg("face_index"))
         .def("capture_reference", [](const FeatureEvaluator& evaluator, const Document& document,
                                      const std::string& body, TopologyKind kind, std::uint32_t index) {
             return evaluator.capture_reference(document, DocumentId::parse(body), kind, index);

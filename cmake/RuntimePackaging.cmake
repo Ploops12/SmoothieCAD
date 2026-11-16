@@ -81,6 +81,10 @@ add_custom_target(package_sources
         --include-project-path tests/blender_feature_preview.py
         --include-project-path tests/blender_feature_preview_ui.py
         --include-project-path docs/solid-feature-previews.md
+        --include-project-path docs/face-attached-sketches.md
+        --include-project-path tests/native_sketch_support.py
+        --include-project-path tests/blender_sketch_support.py
+        --include-project-path tests/blender_sketch_support_ui.py
     DEPENDS package_notices
     COMMENT "Packaging companion sources and offline rebuild materials"
     VERBATIM

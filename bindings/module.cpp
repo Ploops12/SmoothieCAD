@@ -97,6 +97,8 @@ PYBIND11_MODULE(_native, module) {
         .def("volume_mm3", &blendercad::GeometryAdapter::volume_mm3)
         .def("is_valid", &blendercad::GeometryAdapter::is_valid)
         .def("max_tolerance_mm", &blendercad::GeometryAdapter::max_tolerance_mm)
+        .def("planar_face", &blendercad::GeometryAdapter::planar_face,
+             py::arg("shape"), py::arg("face_index"))
         .def("release", &blendercad::GeometryAdapter::release);
     module.def("new_geometry_adapter", &blendercad::make_occt_geometry_adapter,
                py::arg("geometric_budget_mm") = 0.001);

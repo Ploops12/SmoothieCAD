@@ -307,6 +307,99 @@ class BLENDERCAD_OT_set_sketch_dimension(CadOperator, bpy.types.Operator):
                                      self.parameter if self.parameter else self.value_mm)
 
 
+class BLENDERCAD_OT_sketch_support(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.sketch_support"
+    bl_label = "Edit Sketch Support Frame"
+    sketch_id: StringProperty(options={"HIDDEN"})
+    offset_u_mm: FloatProperty(name="U offset (mm)", precision=6)
+    offset_v_mm: FloatProperty(name="V offset (mm)", precision=6)
+    normal_offset_mm: FloatProperty(name="Normal offset (mm)", precision=6)
+    reversed: BoolProperty(name="Into Solid", description="Reverse the support normal and local Y direction")
+    tangent: EnumProperty(name="Tangent direction", default="KEEP", items=(
+        ("KEEP", "Keep saved direction", "Project the existing CAD-local direction onto the support plane"),
+        ("X", "CAD X", "Project part-local X; fail explicitly if parallel to the support normal"),
+        ("Y", "CAD Y", "Project part-local Y; fail explicitly if parallel to the support normal"),
+        ("Z", "CAD Z", "Project part-local Z; fail explicitly if parallel to the support normal")))
+
+    def invoke(self, context, event):
+        try:
+            support = commands._sketch_support(p.read_document(context.scene), self.sketch_id)
+            self.offset_u_mm, self.offset_v_mm = support.offset_u_mm, support.offset_v_mm
+            self.normal_offset_mm, self.reversed = support.normal_offset_mm, support.reversed
+        except (ValueError, KeyError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        return context.window_manager.invoke_props_dialog(self)
+
+    def run(self, context):
+        axes = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}
+        direction = commands.n.Vector3(*axes[self.tangent]) if self.tangent in axes else None
+        commands.edit_sketch_support(context, self.sketch_id, self.offset_u_mm, self.offset_v_mm,
+                                     self.normal_offset_mm, self.reversed, direction)
+
+
+class BLENDERCAD_OT_repair_sketch_support(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.repair_sketch_support"
+    bl_label = "Repair Sketch Support and Resume"
+    bl_description = "Replace this sketch's support from one selected planar CAD face, then resume full history"
+    sketch_id: StringProperty(options={"HIDDEN"})
+
+    def run(self, context):
+        commands.repair_sketch_support(context, self.sketch_id)
+
+
+class BLENDERCAD_OT_attach_sketch_support(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.attach_sketch_support"
+    bl_label = "Attach Sketch to Selected Face and Resume"
+    bl_description = "Move this sketch's 2D definition onto one selected planar CAD face and resume full history"
+    sketch_id: StringProperty(options={"HIDDEN"})
+    reversed: BoolProperty(name="Into Solid", default=True,
+        description="Reverse the face normal for positive-depth cuts; local Y reverses too")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def run(self, context):
+        commands.attach_sketch_support(context, self.sketch_id, self.reversed)
+
+
+class BLENDERCAD_OT_detach_sketch_support(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.detach_sketch_support"
+    bl_label = "Detach Sketch Support"
+    bl_description = "Freeze this sketch's current resolved CAD plane and remove its support dependency"
+    sketch_id: StringProperty(options={"HIDDEN"})
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def run(self, context):
+        commands.detach_sketch_support(context, self.sketch_id)
+
+
+class BLENDERCAD_OT_sketch_support_inputs(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.sketch_support_inputs"
+    bl_label = "Expose Sketch Support Inputs"
+    bl_description = "Roll back before this sketch's first consuming feature to select an upstream support face"
+    sketch_id: StringProperty(options={"HIDDEN"})
+
+    def run(self, context):
+        commands.rollback_sketch_support(context, self.sketch_id)
+
+
+class BLENDERCAD_OT_delete_sketch(CadOperator, bpy.types.Operator):
+    bl_idname = "blendercad.delete_sketch"
+    bl_label = "Delete CAD Sketch"
+    sketch_id: StringProperty(options={"HIDDEN"})
+    cascade: BoolProperty(name="Delete dependent features and attached sketches", default=False,
+        description="Explicitly remove every dependent definition, including supported sketches and bodies")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def run(self, context):
+        commands.delete_sketch(context, self.sketch_id, self.cascade)
+
+
 class BLENDERCAD_OT_parameter(CadOperator, bpy.types.Operator):
     bl_idname = "blendercad.parameter"
     bl_label = "Set CAD Parameter"
@@ -452,6 +545,9 @@ class BLENDERCAD_OT_pick_solid(bpy.types.Operator):
 
 
 _classes = (BLENDERCAD_OT_export_step, BLENDERCAD_OT_add_rectangle_solid, BLENDERCAD_OT_extrude_sketch, BLENDERCAD_OT_recompute, BLENDERCAD_OT_set_sketch_dimension,
+            BLENDERCAD_OT_sketch_support, BLENDERCAD_OT_repair_sketch_support, BLENDERCAD_OT_attach_sketch_support,
+            BLENDERCAD_OT_detach_sketch_support, BLENDERCAD_OT_sketch_support_inputs,
+            BLENDERCAD_OT_delete_sketch,
             BLENDERCAD_OT_fillet, BLENDERCAD_OT_set_fillet_radius, BLENDERCAD_OT_repair_fillet_edges,
             BLENDERCAD_OT_suppress_feature, BLENDERCAD_OT_rollback, BLENDERCAD_OT_move_feature, BLENDERCAD_OT_delete_feature,
             BLENDERCAD_OT_set_feature_depth, BLENDERCAD_OT_parameter,

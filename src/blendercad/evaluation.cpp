@@ -177,6 +177,78 @@ std::optional<ReferenceResolution> source_reference_issue(const Document& docume
     return {};
 }
 
+using CurrentShapes = std::unordered_map<std::string, std::shared_ptr<OwnedShape>>;
+
+class SupportUnavailable final : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+Vector3 cross(Vector3 a, Vector3 b) {
+    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+double dot(Vector3 a, Vector3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
+Vector3 scaled(Vector3 a, double factor) { return {a.x * factor, a.y * factor, a.z * factor}; }
+
+Vector3 unit(Vector3 value, const std::string& context) {
+    const auto magnitude = std::hypot(value.x, value.y, value.z);
+    if (!std::isfinite(magnitude) || magnitude <= 0) throw std::runtime_error(context);
+    return {value.x / magnitude, value.y / magnitude, value.z / magnitude};
+}
+
+SketchPlane resolve_support_plane(const Document& document, const SketchSupport& support,
+                                  const CurrentShapes& current) {
+    const auto context = "Sketch support on feature " + support.feature.to_string() + " face '"
+        + support.face.anchor.key + "' from feature " + support.face.anchor.feature.to_string() + ": ";
+    validate_reference(support.face);
+    if (support.face.kind != TopologyKind::Face) throw std::invalid_argument(context + "support requires a FACE reference");
+    const auto& source = document.feature(support.feature);
+    if (source.body != support.face.body) throw std::invalid_argument(context + "support context belongs to a different body");
+    auto ancestor = std::optional<DocumentId>{support.feature};
+    while (ancestor && *ancestor != support.face.anchor.feature) ancestor = feature_input(document.feature(*ancestor));
+    if (!ancestor) throw std::invalid_argument(context + "reference creator is not an ancestor of the support context");
+    const auto shape = current.find(support.feature.to_string());
+    if (shape == current.end()) throw SupportUnavailable(context + "support context has no current valid result");
+    if (!current.contains(support.face.anchor.feature.to_string())) {
+        throw SupportUnavailable(context + "reference creator has no current valid result");
+    }
+    const auto& creator = document.feature(support.face.anchor.feature);
+    if (const auto issue = source_reference_issue(document, creator, support.face)) {
+        throw std::runtime_error(context + issue->diagnostic);
+    }
+    const auto resolution = shape->second->references->resolve(TopologyKind::Face, support.face.anchor);
+    if (resolution.state != ReferenceState::Resolved || resolution.candidates.size() != 1
+            || resolution.candidates.front().kind != TopologyKind::Face) {
+        throw std::runtime_error(context + "requires exactly one resolved FACE; " + resolution.diagnostic);
+    }
+    const auto plane = shape->second->kernel->planar_face(shape->second->handle, resolution.candidates.front().index);
+    if (!plane) throw std::runtime_error(context + "referenced face is not an exact analytic plane; repair the support");
+    auto normal = unit(cross(plane->x_axis, plane->y_axis), context + "face has a degenerate plane normal");
+    if (support.reversed) normal = scaled(normal, -1);
+    // Saved tangent direction and CAD-origin projection define the frame.
+    // Kernel UV axes/origins and trimmed-face centroids are not stable design
+    // identities and must not move a sketch after an unrelated face edit.
+    const auto preferred = unit(support.x_direction, context + "saved tangent direction must be finite and nonzero");
+    const auto along_normal = dot(preferred, normal);
+    auto x = Vector3{preferred.x - along_normal * normal.x, preferred.y - along_normal * normal.y,
+                     preferred.z - along_normal * normal.z};
+    if (std::hypot(x.x, x.y, x.z) <= 1e-10) {
+        throw std::runtime_error(context + "saved tangent direction is parallel to the face normal; repair the support orientation");
+    }
+    x = unit(x, context + "could not normalize the saved support tangent");
+    const auto y = unit(cross(normal, x), context + "could not construct a support frame");
+    const auto distance = dot(plane->origin, normal) + support.normal_offset_mm;
+    const auto origin = Vector3{normal.x * distance + x.x * support.offset_u_mm + y.x * support.offset_v_mm,
+                               normal.y * distance + x.y * support.offset_u_mm + y.y * support.offset_v_mm,
+                               normal.z * distance + x.z * support.offset_u_mm + y.z * support.offset_v_mm};
+    if (!std::isfinite(origin.x) || !std::isfinite(origin.y) || !std::isfinite(origin.z)) {
+        throw std::runtime_error(context + "support offsets produced a nonfinite plane origin");
+    }
+    return {origin, x, y};
+}
+
 } // namespace
 
 struct FeatureEvaluator::Impl final {
@@ -187,6 +259,9 @@ struct FeatureEvaluator::Impl final {
     std::unordered_map<std::string, CachedFeature> cache;
     std::unordered_map<std::string, std::shared_ptr<OwnedShape>> displays;
     std::unordered_map<std::string, std::shared_ptr<OwnedShape>> last_body_shapes;
+    // Only same-pass current feature results, including upstream contexts whose
+    // final body tip may be failed. Never populate this from last-valid caches.
+    CurrentShapes current_features;
     std::optional<EvaluationReport> report;
 
     std::shared_ptr<OwnedShape> own(std::shared_ptr<GeometryAdapter> owner, ShapeHandle handle,
@@ -223,10 +298,26 @@ bool FeatureEvaluator::matches_document(const Document& document) const {
     return impl_->document && *impl_->document == document;
 }
 
+SketchPlane FeatureEvaluator::support_plane(const Document& document, const SketchSupport& support) const {
+    if (!matches_document(document) || !impl_->report) {
+        throw std::runtime_error("Document changed; recompute before resolving sketch support");
+    }
+    return resolve_support_plane(document, support, impl_->current_features);
+}
+
+SketchProblem FeatureEvaluator::evaluated_sketch(const Document& document, const DocumentId& id) const {
+    if (!matches_document(document) || !impl_->report) {
+        throw std::runtime_error("Document changed; recompute before evaluating sketch support");
+    }
+    auto profile = document.parameterized_sketch(id);
+    if (const auto& support = document.sketch(id).support) profile.plane = support_plane(document, *support);
+    return profile;
+}
+
 EvaluationReport FeatureEvaluator::evaluate(const Document& document) {
     auto& state = *impl_;
     if (state.document && state.document->id() != document.id()) {
-        state.cache.clear(); state.last_body_shapes.clear(); state.displays.clear();
+        state.cache.clear(); state.last_body_shapes.clear(); state.displays.clear(); state.current_features.clear();
     }
     if (!state.kernel || state.tolerance != document.geometric_tolerance_mm()) {
         state.tolerance = document.geometric_tolerance_mm();
@@ -264,7 +355,12 @@ EvaluationReport FeatureEvaluator::evaluate(const Document& document) {
                     // canonical stored zeros are not evaluated solver inputs.
                     // Invalid parameter ranges must fail, not reuse old solids.
                     std::optional<SketchProblem> profile;
-                    if (const auto sketch = feature_sketch(feature)) profile = document.evaluated_sketch(*sketch);
+                    if (const auto sketch = feature_sketch(feature)) {
+                        profile = document.parameterized_sketch(*sketch);
+                        if (const auto& support = document.sketch(*sketch).support) {
+                            profile->plane = resolve_support_plane(document, *support, current);
+                        }
+                    }
                     const auto* fillet = std::get_if<FilletFeature>(&feature.parameters);
                     std::vector<std::uint32_t> edge_indices;
                     if (fillet) {
@@ -341,6 +437,9 @@ EvaluationReport FeatureEvaluator::evaluate(const Document& document) {
                     }
                     evaluation.state = EvaluationState::UpToDate;
                     evaluation.has_last_valid = true;
+                } catch (const SupportUnavailable& error) {
+                    evaluation.state = EvaluationState::Blocked;
+                    evaluation.diagnostic = error.what();
                 } catch (const std::exception& error) {
                     evaluation.diagnostic = error.what();
                 } catch (...) {
@@ -374,6 +473,7 @@ EvaluationReport FeatureEvaluator::evaluate(const Document& document) {
     }
     std::erase_if(state.cache, [&](const auto& item) { return !existing_features.contains(item.first); });
     std::erase_if(state.last_body_shapes, [&](const auto& item) { return !existing_bodies.contains(item.first); });
+    state.current_features = std::move(current);
     state.document = document;
     state.report = report;
     for (const auto& reference : document.references()) {
@@ -421,6 +521,13 @@ TopologyMeasure FeatureEvaluator::measure_element(const Document& document, cons
     (void)impl_->body(document, body, true);
     const auto shape = impl_->displays.at(body.to_string());
     return shape->kernel->measure(shape->handle, element);
+}
+
+std::optional<SketchPlane> FeatureEvaluator::planar_face(const Document& document, const DocumentId& body,
+                                                       std::uint32_t face_index) const {
+    (void)impl_->body(document, body, true);
+    const auto shape = impl_->displays.at(body.to_string());
+    return shape->kernel->planar_face(shape->handle, face_index);
 }
 
 TopologyMeasure FeatureEvaluator::measure_reference(const Document& document, const PersistentReference& reference) const {

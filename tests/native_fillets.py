@@ -230,7 +230,7 @@ class FilletChecks(unittest.TestCase):
         self.assertNotIn(sketch, feature.dependencies)
         self.assertEqual([target_key(edge) for edge in feature.edges], [target_key(edges[0])])
         snapshot = document.to_snapshot()
-        self.assertEqual(snapshot["schema_version"], 7)
+        self.assertEqual(snapshot["schema_version"], 8)
         record = snapshot["features"][-1]
         self.assertEqual(set(record), {"id", "name", "version", "type", "body", "input", "radius", "edges", "suppressed"})
         self.assertEqual(record["radius"], {"value_mm": 1})
@@ -255,7 +255,7 @@ class FilletChecks(unittest.TestCase):
             lambda s, f: f["radius"].update(parameter="missing"), lambda s, f: f.update(edges=[]),
             lambda s, f: f["edges"][0].update(kind="face"), lambda s, f: f["edges"][0].update(index=0),
             lambda s, f: f.update(version=2), lambda s, f: s.update(schema_version=6),
-            lambda s, f: s.update(schema_version=8),
+            lambda s, f: s.update(schema_version=9),
         ):
             candidate = copy.deepcopy(snapshot)
             mutate(candidate, candidate["features"][-1])

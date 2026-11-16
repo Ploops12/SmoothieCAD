@@ -59,6 +59,11 @@ double as_number(const py::handle& value, const char* context) {
     return number;
 }
 
+bool as_bool(const py::handle& value, const char* context) {
+    if (!PyBool_Check(value.ptr())) invalid(std::string(context) + " must be a boolean");
+    return py::cast<bool>(value);
+}
+
 std::uint64_t as_revision(const py::handle& value) {
     if (PyBool_Check(value.ptr()) || !PyLong_Check(value.ptr())) {
         invalid("revision must be a nonnegative integer");
@@ -118,13 +123,15 @@ py::list point2_snapshot(const Point2& point) {
     return result;
 }
 
-SketchProblem parse_sketch_problem(const py::dict& sketch, bool allow_parameters = false) {
-    const auto plane = as_dict(required(sketch, "plane", "sketch"), "sketch plane");
-    require_fields(plane, {"origin", "x_axis", "y_axis"}, "sketch plane");
+SketchProblem parse_sketch_problem(const py::dict& sketch, bool allow_parameters = false, bool attached = false) {
     SketchProblem problem;
-    problem.plane.origin = parse_vector3(plane["origin"], "plane origin");
-    problem.plane.x_axis = parse_vector3(plane["x_axis"], "plane x_axis");
-    problem.plane.y_axis = parse_vector3(plane["y_axis"], "plane y_axis");
+    if (!attached) {
+        const auto plane = as_dict(required(sketch, "plane", "sketch"), "sketch plane");
+        require_fields(plane, {"origin", "x_axis", "y_axis"}, "sketch plane");
+        problem.plane.origin = parse_vector3(plane["origin"], "plane origin");
+        problem.plane.x_axis = parse_vector3(plane["x_axis"], "plane x_axis");
+        problem.plane.y_axis = parse_vector3(plane["y_axis"], "plane y_axis");
+    }
 
     for (const auto& raw_entity : as_list(required(sketch, "entities", "sketch"), "entities")) {
         const auto entity = as_dict(raw_entity, "entity");
@@ -221,6 +228,19 @@ PersistentReference parse_target_fields(const py::dict& reference) {
              as_string(reference["key"], "reference key")}};
 }
 
+SketchSupport parse_sketch_support(const py::handle& value) {
+    const auto support = as_dict(value, "sketch support");
+    require_fields(support, {"feature", "face", "x_direction", "offset_u_mm", "offset_v_mm", "normal_offset_mm", "reversed"}, "sketch support");
+    const auto face = as_dict(support["face"], "sketch support face");
+    require_fields(face, {"body", "kind", "feature", "key"}, "sketch support face");
+    return {DocumentId::parse(as_string(support["feature"], "sketch support feature")),
+            parse_target_fields(face), parse_vector3(support["x_direction"], "sketch support x_direction"),
+            as_number(support["offset_u_mm"], "sketch support offset_u_mm"),
+            as_number(support["offset_v_mm"], "sketch support offset_v_mm"),
+            as_number(support["normal_offset_mm"], "sketch support normal_offset_mm"),
+            as_bool(support["reversed"], "sketch support reversed")};
+}
+
 FeatureDefinition parse_feature_snapshot(const py::handle& value, bool allow_fillet) {
     const auto feature = as_dict(value, "feature");
     const auto type = as_string(required(feature, "type", "feature"), "feature type");
@@ -287,6 +307,18 @@ py::dict target_snapshot(const PersistentReference& target) {
     result["kind"] = kind;
     result["feature"] = target.anchor.feature.to_string();
     result["key"] = target.anchor.key;
+    return result;
+}
+
+py::dict support_snapshot(const SketchSupport& support) {
+    py::dict result;
+    result["feature"] = support.feature.to_string();
+    result["face"] = target_snapshot(support.face);
+    result["x_direction"] = vector3_snapshot(support.x_direction);
+    result["offset_u_mm"] = support.offset_u_mm;
+    result["offset_v_mm"] = support.offset_v_mm;
+    result["normal_offset_mm"] = support.normal_offset_mm;
+    result["reversed"] = support.reversed;
     return result;
 }
 
@@ -371,14 +403,17 @@ py::dict sketch_snapshot(const SketchDefinition& sketch) {
     py::dict result;
     result["id"] = sketch.id.to_string();
     result["name"] = sketch.name;
-    result["version"] = std::ranges::any_of(sketch.problem.constraints,
-        [](const auto& constraint) { return constraint.parameter.has_value(); }) ? 2 : 1;
+    result["version"] = sketch.support ? 3 : (std::ranges::any_of(sketch.problem.constraints,
+        [](const auto& constraint) { return constraint.parameter.has_value(); }) ? 2 : 1);
 
-    py::dict plane;
-    plane["origin"] = vector3_snapshot(sketch.problem.plane.origin);
-    plane["x_axis"] = vector3_snapshot(sketch.problem.plane.x_axis);
-    plane["y_axis"] = vector3_snapshot(sketch.problem.plane.y_axis);
-    result["plane"] = std::move(plane);
+    if (sketch.support) result["support"] = support_snapshot(*sketch.support);
+    else {
+        py::dict plane;
+        plane["origin"] = vector3_snapshot(sketch.problem.plane.origin);
+        plane["x_axis"] = vector3_snapshot(sketch.problem.plane.x_axis);
+        plane["y_axis"] = vector3_snapshot(sketch.problem.plane.y_axis);
+        result["plane"] = std::move(plane);
+    }
 
     py::list entities;
     for (const auto& entity : sketch.problem.entities) {
@@ -436,7 +471,7 @@ Document parse_snapshot(const py::object& raw) {
             require_fields(snapshot, {"schema_version", "document_id", "revision",
                                       "geometric_tolerance_mm", "parameters", "sketches",
                                       "features", "rollback_before"}, "schema 3 snapshot");
-        } else if (schema == 4 || schema == 5 || schema == 6 || schema == Document::current_schema_version) {
+        } else if (schema == 4 || schema == 5 || schema == 6 || schema == 7 || schema == Document::current_schema_version) {
             require_fields(snapshot, {"schema_version", "document_id", "revision",
                                       "geometric_tolerance_mm", "parameters", "sketches",
                                       "features", "rollback_before", "references"}, "document snapshot");
@@ -465,15 +500,17 @@ Document parse_snapshot(const py::object& raw) {
         if (schema >= 2) {
             for (const auto& raw_sketch : as_list(snapshot["sketches"], "sketches")) {
                 const auto sketch = as_dict(raw_sketch, "sketch");
-                require_fields(sketch, {"id", "name", "version", "plane", "entities", "constraints"},
-                               "sketch");
-                const auto version = as_version(sketch["version"], "sketch version");
-                if (version != 1 && !(schema >= 6 && version == 2)) {
+                const auto version = as_version(required(sketch, "version", "sketch"), "sketch version");
+                if (version != 1 && !(schema >= 6 && version == 2) && !(schema >= 8 && version == 3)) {
                     invalid("unsupported sketch definition version");
                 }
-                SketchProblem problem = parse_sketch_problem(sketch, version == 2);
+                if (version == 3) require_fields(sketch, {"id", "name", "version", "support", "entities", "constraints"}, "face-attached sketch");
+                else require_fields(sketch, {"id", "name", "version", "plane", "entities", "constraints"}, "sketch");
+                SketchProblem problem = parse_sketch_problem(sketch, version >= 2, version == 3);
+                std::optional<SketchSupport> support;
+                if (version == 3) support = parse_sketch_support(sketch["support"]);
                 sketches.push_back({DocumentId::parse(as_string(sketch["id"], "sketch id")),
-                                    as_string(sketch["name"], "sketch name"), std::move(problem)});
+                                    as_string(sketch["name"], "sketch name"), std::move(problem), std::move(support)});
             }
         }
 
@@ -529,11 +566,35 @@ void bind_document(py::module_& module) {
             return std::string(unit_name(parameter.unit));
         });
 
+    py::class_<SketchSupport>(module, "SketchSupport")
+        .def(py::init([](const std::string& feature, PersistentReference face,
+                         std::optional<Vector3> x_direction, const py::object& u,
+                         const py::object& v, const py::object& normal, const py::object& reversed) {
+            return SketchSupport{DocumentId::parse(feature), std::move(face), x_direction.value_or(Vector3{1, 0, 0}),
+                as_number(u, "sketch support offset_u_mm"), as_number(v, "sketch support offset_v_mm"),
+                as_number(normal, "sketch support normal_offset_mm"), as_bool(reversed, "sketch support reversed")};
+        }), py::arg("feature_id"), py::arg("face"), py::arg("x_direction") = py::none(),
+            py::arg("offset_u_mm") = 0.0, py::arg("offset_v_mm") = 0.0,
+            py::arg("normal_offset_mm") = 0.0, py::arg("reversed") = false)
+        .def_property("feature_id", [](const SketchSupport& support) { return support.feature.to_string(); },
+            [](SketchSupport& support, const std::string& id) { support.feature = DocumentId::parse(id); })
+        .def_readwrite("face", &SketchSupport::face)
+        .def_readwrite("x_direction", &SketchSupport::x_direction)
+        .def_property("offset_u_mm", [](const SketchSupport& support) { return support.offset_u_mm; },
+            [](SketchSupport& support, const py::object& value) { support.offset_u_mm = as_number(value, "sketch support offset_u_mm"); })
+        .def_property("offset_v_mm", [](const SketchSupport& support) { return support.offset_v_mm; },
+            [](SketchSupport& support, const py::object& value) { support.offset_v_mm = as_number(value, "sketch support offset_v_mm"); })
+        .def_property("normal_offset_mm", [](const SketchSupport& support) { return support.normal_offset_mm; },
+            [](SketchSupport& support, const py::object& value) { support.normal_offset_mm = as_number(value, "sketch support normal_offset_mm"); })
+        .def_property("reversed", [](const SketchSupport& support) { return support.reversed; },
+            [](SketchSupport& support, const py::object& value) { support.reversed = as_bool(value, "sketch support reversed"); });
+
     py::class_<SketchDefinition>(module, "Sketch")
         .def_property_readonly("id", [](const SketchDefinition& sketch) {
             return sketch.id.to_string();
         })
         .def_readonly("name", &SketchDefinition::name)
+        .def_property_readonly("support", [](const SketchDefinition& sketch) { return sketch.support; })
         .def_property_readonly("problem", [](const SketchDefinition& sketch) {
             return sketch.problem;
         });
@@ -603,6 +664,9 @@ void bind_document(py::module_& module) {
         .def("get_feature", [](const Document& document, const std::string& id) {
             return document.feature(DocumentId::parse(id));
         })
+        .def("feature_dependencies", [](const Document& document, const std::string& id) {
+            return identity_strings(document.feature_dependencies(DocumentId::parse(id)));
+        }, py::arg("feature_id"))
         .def("get_reference", [](const Document& document, const std::string& id) {
             return document.reference(DocumentId::parse(id));
         })
@@ -633,18 +697,28 @@ void bind_document(py::module_& module) {
         .def("evaluated_sketch", [](const Document& document, const std::string& id) {
             return document.evaluated_sketch(DocumentId::parse(id));
         }, py::arg("sketch_id"))
+        .def("parameterized_sketch", [](const Document& document, const std::string& id) {
+            return document.parameterized_sketch(DocumentId::parse(id));
+        }, py::arg("sketch_id"))
         .def("set_sketch_dimension", [](Document& document, const std::string& sketch,
                                         const std::string& constraint, const py::object& value) {
             document.set_sketch_dimension(DocumentId::parse(sketch), DocumentId::parse(constraint),
                                           parse_depth_argument(value, "sketch dimension"));
         }, py::arg("sketch_id"), py::arg("constraint_id"), py::arg("value"))
-        .def("add_sketch", [](Document& document, std::string name, const SketchProblem& problem) {
-            return document.add_sketch(std::move(name), problem).to_string();
-        })
+        .def("add_sketch", [](Document& document, std::string name, const SketchProblem& problem,
+                              std::optional<SketchSupport> support) {
+            return document.add_sketch(std::move(name), problem, std::move(support)).to_string();
+        }, py::arg("name"), py::arg("problem"), py::arg("support") = py::none())
         .def("replace_sketch", [](Document& document, const std::string& id,
                                    const SketchProblem& problem) {
             document.replace_sketch(DocumentId::parse(id), problem);
         })
+        .def("set_sketch_support", [](Document& document, const std::string& id, SketchSupport support) {
+            document.set_sketch_support(DocumentId::parse(id), std::move(support));
+        }, py::arg("sketch_id"), py::arg("support"))
+        .def("detach_sketch", [](Document& document, const std::string& id, SketchPlane plane) {
+            document.detach_sketch(DocumentId::parse(id), std::move(plane));
+        }, py::arg("sketch_id"), py::arg("plane"))
         .def("rename_sketch", [](Document& document, const std::string& id,
                                   std::string name) {
             document.rename_sketch(DocumentId::parse(id), std::move(name));

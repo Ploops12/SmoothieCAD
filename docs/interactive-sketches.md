@@ -14,6 +14,13 @@ sketch remains one definition, not a separately stored shape per placed body.
 Standalone sketches are listed in the sidebar but currently drawn only while
 editing, not as independent persistent viewport objects.
 
+**On selected face → Into Solid/Outward** starts an associative planar sketch
+on one current selected CAD face. Its saved upstream face reference replaces a
+literal frame; earlier changes move the evaluated plane. Attached sketches use
+their consuming Solid's placement (or their support Solid before consumption),
+not an unrelated active object. See [face-attached sketches](face-attached-sketches.md)
+for orientation, offsets, explicit repair/detach and dependency behaviour.
+
 The view temporarily aligns to the sketch plane and uses orthographic projection.
 Existing geometry, or the active Solid's bounds for a new empty sketch, determines
 the initial view extent; there is no fixed large-part floor preventing tiny
@@ -147,7 +154,7 @@ follows the sketch plane's positive right-handed normal; position/orient the
 sketch accordingly. Creating features while rolled back is rejected explicitly.
 Earlier sketch edits recompute affected features, and stable references resolve
 through their existing provenance rather than new display indices.
-The sketch list's **Preview**/**Preview Cut** buttons offer the same creation
+The sketch list's **Preview Extrude**/**Preview Cut** buttons offer the same creation
 definitions through a detached ghost result and depth handle, with numeric
 entry and one-interaction confirmation/cancellation; see
 [solid feature previews](solid-feature-previews.md).
@@ -156,15 +163,17 @@ Current profile evaluation still accepts one connected simple line loop or one
 circle per sketch. Open chains, multiple regions and mixed line/arc loops do not
 silently become an arbitrary chosen face. Use separate closed sketches/cuts for
 separate hole profiles until multiple-region/arc evaluation is implemented.
-Face-attached associative planes, a full sketch toolbar/gizmo system, per-stroke
+Curved-surface attachment, a full sketch toolbar/gizmo system, per-stroke
 undo and additive unions remain follow-up work.
 [Constant-radius fillets](fillets-and-history.md) now consume selected persistent
 CAD edges after extrusion/cuts. The complete bracket acceptance gate is not claimed here.
 
 ## Build and verification
 
-No schema or supplemental dependency change is required; this uses current
-sketch definitions introduced in schema 6 (retained in current schema 7). CMake packages all editor modules automatically.
+The original editor uses parameter-bound sketch definitions introduced in schema
+6. Attached sketches add schema-8 support definitions, while unattached sketch
+formats remain unchanged. No supplemental dependency is required. CMake packages
+all editor modules automatically.
 
 ```sh
 cmake --build build --target check -j2

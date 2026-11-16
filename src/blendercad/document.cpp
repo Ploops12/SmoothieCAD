@@ -59,6 +59,42 @@ double resolve_sketch_parameter(const SketchDefinition& sketch, const SketchCons
     return found->value;
 }
 
+void validate_support_fields(const SketchDefinition& sketch) {
+    if (!sketch.support) return;
+    const auto& support = *sketch.support;
+    validate_reference(support.face);
+    if (support.face.kind != TopologyKind::Face) throw std::invalid_argument("sketch support requires a persistent FACE reference");
+    const auto& x = support.x_direction;
+    const auto length = std::hypot(x.x, x.y, x.z);
+    if (!std::isfinite(x.x) || !std::isfinite(x.y) || !std::isfinite(x.z)
+            || !std::isfinite(length) || length == 0) {
+        throw std::invalid_argument("sketch support x_direction must be finite and nonzero");
+    }
+    if (!std::isfinite(support.offset_u_mm) || !std::isfinite(support.offset_v_mm)
+            || !std::isfinite(support.normal_offset_mm)) {
+        throw std::invalid_argument("sketch support offsets must be finite");
+    }
+    if (sketch.problem.plane != SketchPlane{}) {
+        throw std::invalid_argument("face-attached sketches require a canonical identity placeholder plane");
+    }
+}
+
+std::vector<DocumentId> design_feature_dependencies(const FeatureDefinition& feature,
+                                                    const std::vector<SketchDefinition>& sketches) {
+    auto dependencies = blendercad::feature_dependencies(feature);
+    auto add = [&](const DocumentId& id) {
+        if (std::ranges::find(dependencies, id) == dependencies.end()) dependencies.push_back(id);
+    };
+    if (const auto id = feature_sketch(feature)) {
+        const auto found = std::ranges::find_if(sketches, [&](const auto& sketch) { return sketch.id == *id; });
+        if (found != sketches.end() && found->support) {
+            add(found->support->feature);
+            add(found->support->face.anchor.feature);
+        }
+    }
+    return dependencies;
+}
+
 std::unordered_set<std::string> validate_sketches(const DocumentId& document_id,
                                                const std::vector<SketchDefinition>& sketches,
                                                const std::vector<Parameter>& parameters) {
@@ -69,6 +105,7 @@ std::unordered_set<std::string> validate_sketches(const DocumentId& document_id,
     for (const auto& sketch : sketches) {
         insert(sketch.id);
         validate_name(sketch.name);
+        validate_support_fields(sketch);
         validate_sketch(sketch.problem, true);
         for (const auto& entity : sketch.problem.entities) insert(entity.id);
         for (const auto& constraint : sketch.problem.constraints) {
@@ -111,6 +148,11 @@ void validate_design(const DocumentId& id, const std::vector<Parameter>& paramet
         if (const auto sketch = feature_sketch(feature); sketch && !sketch_ids.contains(sketch->to_string())) {
             throw std::invalid_argument("feature references a missing sketch");
         }
+        for (const auto& dependency : design_feature_dependencies(feature, sketches)) {
+            if (!sketch_ids.contains(dependency.to_string()) && !available.contains(dependency.to_string())) {
+                throw std::invalid_argument("feature dependency, including sketch support, must precede its consumer");
+            }
+        }
         (void)resolve_length(feature_length(feature), parameters);
         const auto body = feature.body.to_string();
         if (const auto input = feature_input(feature)) {
@@ -149,6 +191,25 @@ void validate_design(const DocumentId& id, const std::vector<Parameter>& paramet
         body_tips.insert_or_assign(body, feature.id);
         available.emplace(feature.id.to_string(), &feature);
     }
+    for (const auto& sketch : sketches) {
+        if (!sketch.support) continue;
+        const auto& support = *sketch.support;
+        const auto context = available.find(support.feature.to_string());
+        const auto creator = available.find(support.face.anchor.feature.to_string());
+        if (context == available.end() || creator == available.end()) {
+            throw std::invalid_argument("sketch support context or face creator references a missing feature");
+        }
+        if (context->second->body != support.face.body || creator->second->body != support.face.body) {
+            throw std::invalid_argument("sketch support face body must match its context and creator");
+        }
+        auto ancestor = std::optional{support.feature};
+        bool found = false;
+        while (ancestor) {
+            if (*ancestor == support.face.anchor.feature) { found = true; break; }
+            ancestor = feature_input(*available.at(ancestor->to_string()));
+        }
+        if (!found) throw std::invalid_argument("sketch support face creator must belong to its context input ancestor chain");
+    }
     if (rollback_before && !available.contains(rollback_before->to_string())) throw std::invalid_argument("rollback marker references a missing feature");
     for (const auto& reference : references) {
         insert(reference.id);
@@ -158,6 +219,33 @@ void validate_design(const DocumentId& id, const std::vector<Parameter>& paramet
         if (anchor == available.end()) throw std::invalid_argument("reference anchors a missing feature");
         if (anchor->second->body != reference.target.body) throw std::invalid_argument("reference body does not match its anchor feature");
     }
+}
+
+struct DeletionClosure final {
+    std::unordered_set<std::string> sketches;
+    std::unordered_set<std::string> features;
+};
+
+DeletionClosure deletion_closure(const std::vector<SketchDefinition>& sketches,
+                                 const std::vector<FeatureDefinition>& features, DeletionClosure removed) {
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (const auto& sketch : sketches) {
+            if (sketch.support && (removed.features.contains(sketch.support->feature.to_string())
+                    || removed.features.contains(sketch.support->face.anchor.feature.to_string()))) {
+                changed = removed.sketches.insert(sketch.id.to_string()).second || changed;
+            }
+        }
+        for (const auto& feature : features) {
+            if (std::ranges::any_of(design_feature_dependencies(feature, sketches), [&](const auto& dependency) {
+                    return removed.sketches.contains(dependency.to_string()) || removed.features.contains(dependency.to_string());
+                })) {
+                changed = removed.features.insert(feature.id.to_string()).second || changed;
+            }
+        }
+    }
+    return removed;
 }
 
 } // namespace
@@ -294,6 +382,13 @@ const SketchDefinition& Document::sketch(const DocumentId& id) const {
 }
 
 SketchProblem Document::evaluated_sketch(const DocumentId& id) const {
+    if (sketch(id).support) {
+        throw std::invalid_argument("face-attached sketch requires FeatureEvaluator.evaluated_sketch to resolve its support plane");
+    }
+    return parameterized_sketch(id);
+}
+
+SketchProblem Document::parameterized_sketch(const DocumentId& id) const {
     const auto& definition = sketch(id);
     auto resolved = definition.problem;
     for (auto& constraint : resolved.constraints) {
@@ -336,10 +431,10 @@ void Document::publish_design(std::vector<SketchDefinition> sketches, std::vecto
     ++revision_;
 }
 
-DocumentId Document::add_sketch(std::string name, SketchProblem problem) {
+DocumentId Document::add_sketch(std::string name, SketchProblem problem, std::optional<SketchSupport> support) {
     const auto id = DocumentId::generate();
     auto candidate = sketches_;
-    candidate.push_back({id, std::move(name), std::move(problem)});
+    candidate.push_back({id, std::move(name), std::move(problem), std::move(support)});
     publish_sketches(std::move(candidate));
     return id;
 }
@@ -349,6 +444,28 @@ void Document::replace_sketch(const DocumentId& id, SketchProblem problem) {
     auto candidate = sketches_;
     for (auto& sketch : candidate) {
         if (sketch.id == id) sketch.problem = std::move(problem);
+    }
+    publish_sketches(std::move(candidate));
+}
+
+void Document::set_sketch_support(const DocumentId& id, SketchSupport support) {
+    (void)sketch(id);
+    auto candidate = sketches_;
+    for (auto& sketch : candidate) {
+        if (sketch.id != id) continue;
+        sketch.support = std::move(support);
+        sketch.problem.plane = SketchPlane{};
+    }
+    publish_sketches(std::move(candidate));
+}
+
+void Document::detach_sketch(const DocumentId& id, SketchPlane plane) {
+    if (!sketch(id).support) throw std::invalid_argument("sketch is not face-attached");
+    auto candidate = sketches_;
+    for (auto& sketch : candidate) {
+        if (sketch.id != id) continue;
+        sketch.support.reset();
+        sketch.problem.plane = std::move(plane);
     }
     publish_sketches(std::move(candidate));
 }
@@ -394,6 +511,10 @@ const FeatureDefinition& Document::feature(const DocumentId& id) const {
     const auto found = std::ranges::find_if(features_, [&](const auto& feature) { return feature.id == id; });
     if (found == features_.end()) throw std::invalid_argument("unknown feature identity: " + id.to_string());
     return *found;
+}
+
+std::vector<DocumentId> Document::feature_dependencies(const DocumentId& id) const {
+    return design_feature_dependencies(feature(id), sketches_);
 }
 
 const ReferenceDefinition& Document::reference(const DocumentId& id) const {
@@ -504,50 +625,59 @@ void Document::reorder_features(const std::vector<DocumentId>& order) {
 
 void Document::erase_feature(const DocumentId& id, bool cascade) {
     (void)feature(id);
-    std::unordered_set<std::string> removed{id.to_string()};
+    auto removed = deletion_closure(sketches_, features_, {{}, {id.to_string()}});
+    if (!cascade) {
+        for (const auto& sketch : sketches_) {
+            if (removed.sketches.contains(sketch.id.to_string())) {
+                throw std::invalid_argument("feature has dependent face-attached sketch: " + sketch.id.to_string());
+            }
+        }
+        for (const auto& feature : features_) {
+            if (feature.id != id && removed.features.contains(feature.id.to_string())) {
+                throw std::invalid_argument("feature has dependent: " + feature.id.to_string());
+            }
+        }
+    }
+    auto sketches = sketches_;
+    std::erase_if(sketches, [&](const auto& sketch) { return removed.sketches.contains(sketch.id.to_string()); });
     std::vector<FeatureDefinition> candidate;
     for (const auto& feature : features_) {
-        if (std::ranges::any_of(feature_dependencies(feature), [&](const auto& dependency) {
-                return removed.contains(dependency.to_string());
-            })) {
-            if (!cascade) throw std::invalid_argument("feature has dependent: " + feature.id.to_string());
-            removed.insert(feature.id.to_string());
-        }
-        if (!removed.contains(feature.id.to_string())) candidate.push_back(feature);
+        if (!removed.features.contains(feature.id.to_string())) candidate.push_back(feature);
     }
     auto rollback = rollback_before_;
-    if (rollback && removed.contains(rollback->to_string())) {
+    if (rollback && removed.features.contains(rollback->to_string())) {
         if (!cascade) throw std::invalid_argument("feature is the rollback marker; clear rollback or request cascade deletion");
         rollback.reset();
     }
     auto references = references_;
     std::erase_if(references, [&](const auto& reference) {
-        if (!removed.contains(reference.target.anchor.feature.to_string())) return false;
+        if (!removed.features.contains(reference.target.anchor.feature.to_string())) return false;
         if (!cascade) throw std::invalid_argument("feature has dependent reference: " + reference.id.to_string());
         return true;
     });
-    publish_design(sketches_, std::move(candidate), std::move(rollback), std::move(references));
+    publish_design(std::move(sketches), std::move(candidate), std::move(rollback), std::move(references));
 }
 
 void Document::erase_sketch(const DocumentId& id, bool cascade) {
     (void)sketch(id);
+    auto removed = deletion_closure(sketches_, features_, {{id.to_string()}, {}});
+    if (!cascade && !removed.features.empty()) {
+        const auto found = std::ranges::find_if(features_, [&](const auto& feature) {
+            return removed.features.contains(feature.id.to_string());
+        });
+        throw std::invalid_argument("sketch has dependent feature: " + found->id.to_string());
+    }
     auto sketches = sketches_;
-    std::erase_if(sketches, [&](const auto& sketch) { return sketch.id == id; });
-    std::unordered_set<std::string> removed;
+    std::erase_if(sketches, [&](const auto& sketch) { return removed.sketches.contains(sketch.id.to_string()); });
     std::vector<FeatureDefinition> features;
     for (const auto& feature : features_) {
-        if (feature_sketch(feature) == id || std::ranges::any_of(feature_dependencies(feature), [&](const auto& dependency) {
-                return removed.contains(dependency.to_string());
-            })) {
-            if (!cascade) throw std::invalid_argument("sketch has dependent feature: " + feature.id.to_string());
-            removed.insert(feature.id.to_string());
-        } else features.push_back(feature);
+        if (!removed.features.contains(feature.id.to_string())) features.push_back(feature);
     }
     auto rollback = rollback_before_;
-    if (rollback && removed.contains(rollback->to_string())) rollback.reset();
+    if (rollback && removed.features.contains(rollback->to_string())) rollback.reset();
     auto references = references_;
     std::erase_if(references, [&](const auto& reference) {
-        if (!removed.contains(reference.target.anchor.feature.to_string())) return false;
+        if (!removed.features.contains(reference.target.anchor.feature.to_string())) return false;
         if (!cascade) throw std::invalid_argument("sketch has dependent reference: " + reference.id.to_string());
         return true;
     });

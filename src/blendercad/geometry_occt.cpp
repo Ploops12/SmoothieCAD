@@ -39,6 +39,7 @@
 #include <gp_Cylinder.hxx>
 #include <gp_Sphere.hxx>
 #include <gp_Lin.hxx>
+#include <gp_Pln.hxx>
 
 #include <cmath>
 #include <algorithm>
@@ -560,6 +561,23 @@ public:
         }
         result.center_mm = public_point(properties.CentreOfMass());
         return result;
+    }
+
+    std::optional<SketchPlane> planar_face(ShapeHandle handle, std::uint32_t face_index) const override {
+        const auto face = TopoDS::Face(lookup_element(handle, {TopologyKind::Face, face_index}));
+        const BRepAdaptor_Surface surface(face, true);
+        if (surface.GetType() != GeomAbs_Plane) return std::nullopt;
+        if (face.Orientation() != TopAbs_FORWARD && face.Orientation() != TopAbs_REVERSED) {
+            throw std::runtime_error("Planar face has no defined outward orientation");
+        }
+        // BRepAdaptor_Surface applies the face's TopLoc_Location. Surface UV
+        // handedness alone is insufficient for reversed solid boundary faces.
+        const auto plane = surface.Plane();
+        const auto position = plane.Position();
+        const auto x = position.XDirection();
+        auto y = position.YDirection();
+        if (face.Orientation() == TopAbs_REVERSED) y.Reverse();
+        return SketchPlane{public_point(plane.Location()), {x.X(), x.Y(), x.Z()}, {y.X(), y.Y(), y.Z()}};
     }
 
     TopologyPoint closest_point(ShapeHandle handle, TopologyElement element, Vector3 point_mm) const override {

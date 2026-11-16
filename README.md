@@ -39,6 +39,8 @@ See [Sketch dimensions](docs/sketch-dimensions.md) for parameter bindings, numer
 
 See [Interactive sketches](docs/interactive-sketches.md) for viewport drawing/constraints/dragging, transactional confirmation, and sketch extrusion/cuts.
 
+See [Face-attached sketches](docs/face-attached-sketches.md) for persistent planar supports, upstream association, explicit frame edits/repair and schema-8 snapshots.
+
 See [Fillets and history](docs/fillets-and-history.md) for persistent edge inputs, radius editing, explicit repair and schema-7 records.
 
 See [Solid feature previews](docs/solid-feature-previews.md) for detached extrusion/cut/fillet results, depth/radius handles and transactional confirmation/cancellation.

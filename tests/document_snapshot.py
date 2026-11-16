@@ -123,8 +123,8 @@ class DocumentSnapshotChecks(unittest.TestCase):
         del old_snapshot["rollback_before"]
         del old_snapshot["references"]
         restored = n.Document.from_snapshot(old_snapshot)
-        self.assertEqual(restored.schema_version, 7)
-        self.assertEqual(restored.to_snapshot()["schema_version"], 7)
+        self.assertEqual(restored.schema_version, 8)
+        self.assertEqual(restored.to_snapshot()["schema_version"], 8)
         self.assertEqual(restored.sketches, [])
         self.assertEqual(restored.references, [])
         self.assertEqual(restored.revision, old_snapshot["revision"])
@@ -136,8 +136,8 @@ class DocumentSnapshotChecks(unittest.TestCase):
         del snapshot["rollback_before"]
         del snapshot["references"]
         restored = n.Document.from_snapshot(snapshot)
-        self.assertEqual(restored.schema_version, 7)
-        self.assertEqual(restored.to_snapshot()["schema_version"], 7)
+        self.assertEqual(restored.schema_version, 8)
+        self.assertEqual(restored.to_snapshot()["schema_version"], 8)
         self.assertEqual(restored.to_snapshot()["sketches"], snapshot["sketches"])
         self.assertEqual(restored.to_snapshot()["features"], [])
         self.assertIsNone(restored.rollback_before)
@@ -151,7 +151,7 @@ class DocumentSnapshotChecks(unittest.TestCase):
         snapshot["schema_version"] = 3
         del snapshot["references"]
         restored = n.Document.from_snapshot(snapshot)
-        self.assertEqual(restored.schema_version, 7)
+        self.assertEqual(restored.schema_version, 8)
         self.assertEqual(restored.references, [])
         self.assertEqual(restored.revision, snapshot["revision"])
         upgraded = restored.to_snapshot()
@@ -207,7 +207,7 @@ class DocumentSnapshotChecks(unittest.TestCase):
                                        ("Outer edge", "edge:start:source", n.TopologyKind.EDGE),
                                        ("Corner", "vertex:start:source", n.TopologyKind.VERTEX))]
         snapshot = document.to_snapshot()
-        self.assertEqual(snapshot["schema_version"], 7)
+        self.assertEqual(snapshot["schema_version"], 8)
         self.assertEqual(set(snapshot["references"][0]), {"id", "name", "version", "body", "kind", "feature", "key"})
         self.assertEqual([item["kind"] for item in snapshot["references"]], ["face", "edge", "vertex"])
         self.assertEqual(n.Document.from_snapshot(json.loads(json.dumps(snapshot))).to_snapshot(), snapshot)
@@ -490,7 +490,7 @@ class DocumentSnapshotChecks(unittest.TestCase):
         with self.assertRaises(ValueError):
             n.Document.from_snapshot(future_document)
         future_sketch = copy.deepcopy(snapshot)
-        future_sketch["sketches"][0]["version"] = 3
+        future_sketch["sketches"][0]["version"] = 4
         with self.assertRaises(ValueError):
             n.Document.from_snapshot(future_sketch)
 

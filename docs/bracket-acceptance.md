@@ -125,3 +125,7 @@ technical drawing sheets. Solid feature previews and depth/radius handles now
 have their [own transaction tools](solid-feature-previews.md). Full toolbar/gizmo coverage,
 broader native operation protection and the documented rendering/selection gaps
 remain separate work even after this reference part passes.
+
+[Associative planar supports](face-attached-sketches.md) now have a separate
+moving-pocket workflow and explicit repair checks; the historical reference
+bracket above continues to demonstrate its explicitly positioned-plane recipe.

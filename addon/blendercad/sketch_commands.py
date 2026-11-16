@@ -50,10 +50,11 @@ class Session:
     and the preceding valid numeric display retained for diagnosis and repair.
     """
 
-    def __init__(self, document, sketch_id="", name="Sketch", plane=None):
+    def __init__(self, document, sketch_id="", name="Sketch", plane=None, *, support=None, evaluator=None):
         if n is None:
             raise RuntimeError("The native CAD module is required to edit sketches")
         self.document = _clone_document(document)
+        self.evaluator = evaluator.fork() if evaluator is not None else None
         if sketch_id:
             problem = self.document.get_sketch(sketch_id)
             self.sketch_id = sketch_id
@@ -61,9 +62,17 @@ class Session:
             problem = n.SketchProblem()
             if plane is not None:
                 problem.plane = plane
-            self.sketch_id = self.document.add_sketch(name, problem)
+            self.sketch_id = self.document.add_sketch(name, problem, support)
         self.display_problem = n.SketchProblem()
         self.display_problem.plane = problem.plane
+        definition = next(item for item in self.document.sketches if item.id == self.sketch_id)
+        if definition.support is not None:
+            if self.evaluator is None:
+                raise ValueError("An attached sketch requires a native evaluator to resolve its support plane")
+            self.evaluator.evaluate(self.document)
+            # Resolve only the support first: a conflicting/invalid 2D sketch
+            # must remain editable, but its frame must never be guessed.
+            self.display_problem.plane = self.evaluator.support_plane(self.document, definition.support)
         self.report = None
         self.error = ""
         self._accept(self.document)
@@ -75,11 +84,24 @@ class Session:
         result.display_problem = _copy_problem(self.display_problem)
         result.report = self.report  # Native reports expose read-only fields.
         result.error = self.error
+        result.evaluator = self.evaluator.fork() if self.evaluator is not None else None
         return result
+
+    def _numeric_problem(self, document):
+        definition = next(item for item in document.sketches if item.id == self.sketch_id)
+        if definition.support is None:
+            return document.evaluated_sketch(self.sketch_id)
+        if self.evaluator is None:
+            raise ValueError("An attached sketch requires a native evaluator to resolve its support plane")
+        evaluator = self.evaluator.fork()
+        evaluator.evaluate(document)
+        problem = evaluator.evaluated_sketch(document, self.sketch_id)
+        self.evaluator = evaluator
+        return problem
 
     def _solve(self, document):
         try:
-            problem = document.evaluated_sketch(self.sketch_id)
+            problem = self._numeric_problem(document)
             report = n.new_sketch_solver(document.geometric_tolerance_mm).solve(problem)
         except (ValueError, RuntimeError, OverflowError) as error:
             return None, None, f"Sketch {self.sketch_id}: {error}"
@@ -215,7 +237,7 @@ class Session:
         if self.report is None or self.error or _bad_report(self.report):
             raise ValueError(f"Cannot move a point in unsolved sketch {self.sketch_id}; repair its dimensions/constraints first")
         try:
-            problem = self.document.evaluated_sketch(self.sketch_id)
+            problem = self._numeric_problem(self.document)
             self._entity_for_reference(problem, ref, point_only=True)
             target = _point(target_uv)
             # Seed from the current valid solution to preserve its branch while

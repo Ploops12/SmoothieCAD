@@ -39,6 +39,10 @@ public:
     [[nodiscard]] virtual double max_tolerance_mm(ShapeHandle shape) const = 0;
     [[nodiscard]] virtual GeometryTopology topology(ShapeHandle shape) const = 0;
     [[nodiscard]] virtual TopologyMeasure measure(ShapeHandle shape, TopologyElement element) const = 0;
+    // Exact analytic support only: a curved face is not fitted to a plane.
+    // The returned frame includes the face location and oriented outward normal.
+    [[nodiscard]] virtual std::optional<SketchPlane> planar_face(ShapeHandle shape,
+                                                               std::uint32_t face_index) const = 0;
     [[nodiscard]] virtual TopologyPoint closest_point(ShapeHandle shape, TopologyElement element,
                                                     Vector3 point_mm) const = 0;
     [[nodiscard]] virtual std::optional<FaceHit> ray_cast(ShapeHandle shape, Vector3 origin_mm,

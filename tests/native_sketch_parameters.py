@@ -173,7 +173,7 @@ class SketchParameterChecks(unittest.TestCase):
         self.assertEqual(numeric["sketches"][0]["version"], 1)
         document.set_sketch_dimension(sketch, width_id, "width")
         snapshot = document.to_snapshot()
-        self.assertEqual(snapshot["schema_version"], 7)
+        self.assertEqual(snapshot["schema_version"], 8)
         self.assertEqual(snapshot["sketches"][0]["version"], 2)
         dimension = next(item for item in snapshot["sketches"][0]["constraints"] if item["id"] == width_id)
         self.assertEqual(set(dimension), {"id", "type", "targets", "parameter"})
@@ -188,8 +188,8 @@ class SketchParameterChecks(unittest.TestCase):
             lambda s, c: c.update(parameter="missing"),
             lambda s, c: s["sketches"][0].update(version=1),
             lambda s, c: s.update(schema_version=5),
-            lambda s, c: s.update(schema_version=8),
-            lambda s, c: s["sketches"][0].update(version=3),
+            lambda s, c: s.update(schema_version=9),
+            lambda s, c: s["sketches"][0].update(version=4),
         ):
             candidate = copy.deepcopy(snapshot)
             item = next(item for item in candidate["sketches"][0]["constraints"] if item["id"] == width_id)

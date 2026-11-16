@@ -115,7 +115,7 @@ class BLENDERCAD_OT_preview_feature(bpy.types.Operator):
     def _handle_frame(self):
         feature = self.session.document.get_feature(self.session.feature_id)
         if feature.sketch_id is not None:
-            problem = self.session.document.evaluated_sketch(feature.sketch_id)
+            problem = self.session.evaluator.evaluated_sketch(self.session.document, feature.sketch_id)
             plane = problem.plane
             points = []
             for entity in problem.entities:

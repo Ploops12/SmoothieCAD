@@ -36,7 +36,7 @@ struct Parameter final {
 // held by GeometryAdapter and are not part of this snapshot.
 class Document final {
 public:
-    static constexpr std::uint32_t current_schema_version = 7;
+    static constexpr std::uint32_t current_schema_version = 8;
     static constexpr double default_geometric_tolerance_mm = 0.001;
 
     Document();
@@ -56,8 +56,10 @@ public:
     [[nodiscard]] const std::vector<SketchDefinition>& sketches() const noexcept { return sketches_; }
     [[nodiscard]] const SketchDefinition& sketch(const DocumentId& id) const;
     [[nodiscard]] SketchProblem evaluated_sketch(const DocumentId& id) const;
+    [[nodiscard]] SketchProblem parameterized_sketch(const DocumentId& id) const;
     [[nodiscard]] const std::vector<FeatureDefinition>& features() const noexcept { return features_; }
     [[nodiscard]] const FeatureDefinition& feature(const DocumentId& id) const;
+    [[nodiscard]] std::vector<DocumentId> feature_dependencies(const DocumentId& id) const;
     [[nodiscard]] const std::optional<DocumentId>& rollback_before() const noexcept { return rollback_before_; }
     [[nodiscard]] const std::vector<ReferenceDefinition>& references() const noexcept { return references_; }
     [[nodiscard]] const ReferenceDefinition& reference(const DocumentId& id) const;
@@ -68,8 +70,10 @@ public:
     void add_parameter_expression(std::string name, std::string expression, ParameterUnit unit);
     void set_parameter_value(std::string_view name, double value);
     void set_parameter_expression(std::string_view name, std::string expression);
-    DocumentId add_sketch(std::string name, SketchProblem problem);
+    DocumentId add_sketch(std::string name, SketchProblem problem, std::optional<SketchSupport> support = {});
     void replace_sketch(const DocumentId& id, SketchProblem problem);
+    void set_sketch_support(const DocumentId& id, SketchSupport support);
+    void detach_sketch(const DocumentId& id, SketchPlane plane);
     void set_sketch_dimension(const DocumentId& sketch_id, const DocumentId& constraint_id, DepthInput value);
     void rename_sketch(const DocumentId& id, std::string name);
     DocumentId add_extrusion(std::string name, const DocumentId& sketch, DepthInput depth);

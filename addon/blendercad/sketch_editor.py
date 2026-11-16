@@ -9,7 +9,7 @@ import threading
 
 import bpy
 from bpy.app.handlers import persistent
-from bpy.props import EnumProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, StringProperty
 from mathutils import Matrix, Vector
 
 from . import _native as n
@@ -84,7 +84,10 @@ class BLENDERCAD_OT_edit_sketch(bpy.types.Operator):
     plane: EnumProperty(name="Plane", items=(("XY", "XY", "XY at the 3D cursor"),
                                              ("XZ", "XZ", "XZ at the 3D cursor"),
                                              ("YZ", "YZ", "YZ at the 3D cursor"),
-                                             ("CURSOR", "Cursor", "Plane oriented by the 3D cursor")), default="XY")
+                                             ("CURSOR", "Cursor", "Plane oriented by the 3D cursor"),
+                                             ("FACE", "Selected Face", "Associative support on one selected planar CAD face")), default="XY")
+    reverse_support: BoolProperty(name="Into Solid", default=True,
+        description="Reverse the support normal for positive-depth cuts; the local Y direction reverses too")
 
     @classmethod
     def poll(cls, context):
@@ -116,8 +119,9 @@ class BLENDERCAD_OT_edit_sketch(bpy.types.Operator):
             self.region = next(region for region in self.area.regions if region.type == "WINDOW")
             self.space = self.area.spaces.active
             self.scale, self.serialized = p.unit_scale(self.scene), self.scene.blendercad_document_snapshot
+            support = commands.selected_face_support(context, self.reverse_support) if not self.sketch_id and self.plane == "FACE" else None
             self.host, self.placement = commands.sketch_placement(context, document, self.sketch_id)
-            plane = None if self.sketch_id else _plane(context, self.plane, self.scale, self.placement)
+            plane = None if self.sketch_id or support is not None else _plane(context, self.plane, self.scale, self.placement)
             name = self.name
             if not self.sketch_id and name == "Sketch":
                 names = {item.name for item in document.sketches}
@@ -125,7 +129,8 @@ class BLENDERCAD_OT_edit_sketch(bpy.types.Operator):
                 while f"Sketch {number}" in names:
                     number += 1
                 name = f"Sketch {number}"
-            self.session = sketch_commands.Session(document, self.sketch_id, name, plane)
+            self.session = sketch_commands.Session(document, self.sketch_id, name, plane,
+                support=support, evaluator=p.runtime(self.scene).evaluator)
             self.sketch_name = next(item.name for item in self.session.document.sketches if item.id == self.session.sketch_id)
             self.selected, self.constraint = [], ""
             self.tool = "SELECT" if self.sketch_id else "LINE"
@@ -134,7 +139,7 @@ class BLENDERCAD_OT_edit_sketch(bpy.types.Operator):
             self.pending_drag, self.input_action, self.input_text, self.message = None, None, "", ""
             view = self.space.region_3d
             self.previous_view = (view.view_rotation.copy(), view.view_location.copy(), view.view_distance,
-                                  view.view_perspective, self.space.clip_start)
+                                  view.view_perspective, self.space.clip_start, self.space.clip_end)
             plane = self.session.display_problem.plane
             x = Vector((plane.x_axis.x, plane.x_axis.y, plane.x_axis.z))
             y = Vector((plane.y_axis.x, plane.y_axis.y, plane.y_axis.z))
@@ -158,8 +163,12 @@ class BLENDERCAD_OT_edit_sketch(bpy.types.Operator):
                     bounds = [display.matrix_world @ Vector(corner) for corner in display.bound_box]
                     center = sum(bounds, Vector()) / len(bounds)
                     extent = max((point - center).length for point in bounds)
+                    if support is not None:
+                        normal = (self.placement.to_3x3() @ x.cross(y)).normalized()
+                        view.view_location = center - normal * (center - view.view_location).dot(normal)
             view.view_distance = max(extent * 2.5, document.geometric_tolerance_mm * self.scale * 20, 1e-7)
-            self.space.clip_start = min(self.space.clip_start, max(self.scale * 0.01, 1e-7))
+            self.space.clip_start = max(1e-6, view.view_distance * 0.01)
+            self.space.clip_end = max(0.01, view.view_distance * 10)
             active = self
             _cancel_pending = False
             self.handlers = []
@@ -197,11 +206,12 @@ class BLENDERCAD_OT_edit_sketch(bpy.types.Operator):
         self.handlers = []
         try:
             if hasattr(self, "previous_view"):
-                rotation, location, distance, perspective, clip = self.previous_view
+                rotation, location, distance, perspective, clip, clip_end = self.previous_view
                 view = self.space.region_3d
                 view.view_rotation, view.view_location = rotation, location
                 view.view_distance, view.view_perspective = distance, perspective
                 self.space.clip_start = clip
+                self.space.clip_end = clip_end
             if hasattr(self, "area"):
                 self.area.tag_redraw()
         except (ReferenceError, RuntimeError):
@@ -213,6 +223,12 @@ class BLENDERCAD_OT_edit_sketch(bpy.types.Operator):
                 self.window.cursor_modal_restore()
         except (ReferenceError, RuntimeError):
             pass
+        # Undo stores the committed scene snapshot, not speculative kernel
+        # caches. Do not retain a private evaluator in a completed operator.
+        session = getattr(self, "session", None)
+        if session is not None:
+            session.evaluator = None
+        self.drag, self.pending_drag = None, None
         if active is self:
             active = None
             _cancel_pending = False
@@ -241,6 +257,8 @@ class BLENDERCAD_OT_edit_sketch(bpy.types.Operator):
                 help_text = "S select | L/C/R draw | G drag | D dimension | H/V/P/O/K constraints | Tab cycle | X delete"
                 status = self.message or self.session.error or "Enter confirm · Esc cancel · Right-click clears drawing"
                 frame = "Solid-local frame" if self.host is not None else "Document frame"
+                if any(item.id == self.session.sketch_id and item.support is not None for item in self.session.document.sketches):
+                    frame = "Face-attached · " + frame
                 lines = [f"{self.sketch_name} · {self.tool.title()} · {state} · {frame}", help_text, status]
                 if self.constraint:
                     constraints = self.session.document.get_sketch(self.session.sketch_id).constraints

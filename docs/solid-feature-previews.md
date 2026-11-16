@@ -2,7 +2,7 @@
 
 ## Blender workflow
 
-The sketch list's **Preview** and **Preview Cut** buttons start an extrusion or
+The sketch list's **Preview Extrude** and **Preview Cut** buttons start an extrusion or
 subtractive extrusion from that saved sketch. A cut requires exactly one active
 owning Solid. **Preview Selected Edge Fillet** uses the selected persistent CAD
 edges and the body's current history tip. In **Feature History**, **Handle**
@@ -112,9 +112,13 @@ isolated application profile live in `build/feature-preview-ui-tests`, owned by
 normal CMake `clean`.
 
 There is no persistence schema, native dependency or kernel tolerance change.
-This adds solid feature input tools, not a complete sketch toolbar, associative
-face placement, multiple profile regions, additive unions, variable-radius
+This adds solid feature input tools, not a complete sketch toolbar,
+multiple profile regions, additive unions, variable-radius
 fillets or a native Blender gizmo integration. Candidate evaluation is synchronous
 on Blender's main thread; complex parts may pause input during evaluation. A
 background job system would need source-revision checks before publication and
 must not access Blender data off-thread.
+
+[Face-attached sketches](face-attached-sketches.md) now supply persistent upstream
+planes to these tools; depth handles query their evaluated frame rather than a
+saved placeholder plane.

@@ -2,6 +2,7 @@
 
 #include "blendercad/document_id.hpp"
 #include "blendercad/geometry_types.hpp"
+#include "blendercad/reference.hpp"
 
 #include <optional>
 #include <string>
@@ -61,10 +62,24 @@ struct SketchProblem final {
     friend bool operator==(const SketchProblem&, const SketchProblem&) = default;
 };
 
+// Defines a frame on a persistent face at an explicit historical result.
+// The numeric plane is evaluated geometry, never a second saved placement.
+struct SketchSupport final {
+    DocumentId feature;
+    PersistentReference face;
+    Vector3 x_direction{1.0, 0.0, 0.0};
+    double offset_u_mm{};
+    double offset_v_mm{};
+    double normal_offset_mm{};
+    bool reversed{};
+    friend bool operator==(const SketchSupport&, const SketchSupport&) = default;
+};
+
 struct SketchDefinition final {
     DocumentId id;
     std::string name;
     SketchProblem problem;
+    std::optional<SketchSupport> support{};
     friend bool operator==(const SketchDefinition&, const SketchDefinition&) = default;
 };
 

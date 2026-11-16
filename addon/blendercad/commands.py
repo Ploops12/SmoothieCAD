@@ -247,6 +247,97 @@ def set_sketch_dimension(context, sketch_id, constraint_id, value):
     return commit(context.scene, document)
 
 
+def selected_face_support(context, reversed=True):
+    """Capture a planar face at its explicit current upstream feature result."""
+    from . import feature_editor, sketch_editor
+    from .selection import _rigid
+    sketch_editor.authorize_commit(context.scene)
+    feature_editor.authorize_commit(context.scene)
+    document, hosts = selected(context, "edit_definition")
+    if len(hosts) != 1 or p.host_for(context.active_object) != hosts[0]:
+        raise ValueError("Select one CAD face on exactly one active Solid")
+    host = hosts[0]
+    context.view_layer.update()
+    _rigid(host)
+    picks = [(pick, packet) for owner, pick, packet in p.visible_selection(context.scene) if owner == host]
+    if len(picks) != 1 or picks[0][0].kind != "FACE":
+        raise ValueError("Select exactly one planar CAD face for sketch support")
+    pick, packet = picks[0]
+    evaluator = p.runtime(context.scene).evaluator
+    plane = evaluator.planar_face(document, host[p.BODY], pick.index)
+    if plane is None:
+        raise ValueError("Sketch support requires an analytic planar CAD face; curved faces are not supported")
+    support = n.SketchSupport(packet.arrays["feature_id"], p.persistent_target(context.scene, host, pick),
+                              x_direction=plane.x_axis, reversed=reversed)
+    evaluator.support_plane(document, support)
+    return support
+
+
+def _sketch_support(document, sketch_id):
+    definition = next((item for item in document.sketches if item.id == sketch_id), None)
+    if definition is None or definition.support is None:
+        raise ValueError("Select a face-attached sketch")
+    return definition.support
+
+
+def edit_sketch_support(context, sketch_id, offset_u, offset_v, normal_offset, reversed, x_direction=None):
+    capabilities.require_capability(context.selected_objects, "edit_definition")
+    document = p.read_document(context.scene)
+    support = _sketch_support(document, sketch_id)
+    support.offset_u_mm, support.offset_v_mm = offset_u, offset_v
+    support.normal_offset_mm, support.reversed = normal_offset, reversed
+    if x_direction is not None:
+        support.x_direction = x_direction
+    document.set_sketch_support(sketch_id, support)
+    return commit(context.scene, document)
+
+
+def repair_sketch_support(context, sketch_id):
+    document = p.read_document(context.scene)
+    previous = _sketch_support(document, sketch_id)
+    support = selected_face_support(context, previous.reversed)
+    support.x_direction = previous.x_direction
+    support.offset_u_mm, support.offset_v_mm = previous.offset_u_mm, previous.offset_v_mm
+    support.normal_offset_mm = previous.normal_offset_mm
+    # Validate the explicit replacement frame before publication; do not invent
+    # another tangent if the saved direction becomes parallel to its normal.
+    p.runtime(context.scene).evaluator.support_plane(document, support)
+    document.set_sketch_support(sketch_id, support)
+    document.set_rollback_before(None)
+    return commit(context.scene, document)
+
+
+def attach_sketch_support(context, sketch_id, reversed=True):
+    document = p.read_document(context.scene)
+    document.set_sketch_support(sketch_id, selected_face_support(context, reversed))
+    document.set_rollback_before(None)
+    return commit(context.scene, document)
+
+
+def detach_sketch_support(context, sketch_id):
+    capabilities.require_capability(context.selected_objects, "edit_definition")
+    document = p.read_document(context.scene)
+    support = _sketch_support(document, sketch_id)
+    plane = p.runtime(context.scene).evaluator.support_plane(document, support)
+    document.detach_sketch(sketch_id, plane)
+    return commit(context.scene, document)
+
+
+def rollback_sketch_support(context, sketch_id):
+    document = p.read_document(context.scene)
+    consumer = next((item for item in document.features if item.sketch_id == sketch_id), None)
+    if consumer is None:
+        raise ValueError("This sketch has no consuming feature; select a valid support face directly")
+    return rollback(context, consumer.id)
+
+
+def delete_sketch(context, sketch_id, cascade=False):
+    capabilities.require_capability(context.selected_objects, "edit_definition")
+    document = p.read_document(context.scene)
+    document.erase_sketch(sketch_id, cascade=cascade)
+    return commit(context.scene, document)
+
+
 def sketch_placement(context, document, sketch_id=""):
     """Explicit edit/creation frame, not ownership stored in a second model.
 
@@ -257,6 +348,21 @@ def sketch_placement(context, document, sketch_id=""):
     from mathutils import Matrix
     host = p.host_for(context.active_object)
     consumers = [item for item in document.features if item.sketch_id == sketch_id] if sketch_id else []
+    definition = next((item for item in document.sketches if item.id == sketch_id), None)
+    if definition is not None and definition.support is not None:
+        bodies = {item.body_id for item in consumers}
+        if not bodies:
+            bodies = {definition.support.face.body_id}
+        if host is None or host.get(p.DOC) != document.id or host.get(p.BODY) not in bodies:
+            if len(bodies) != 1:
+                raise ValueError("Select the consuming Solid whose attached sketch frame should be edited")
+            host = next((obj for obj in p.hosts(context.scene, document.id) if obj.get(p.BODY) in bodies), None)
+        if host is None:
+            raise ValueError("Attached sketch has no available Solid placement frame")
+        from .selection import _rigid
+        context.view_layer.update()
+        _rigid(host)
+        return host, host.matrix_world.copy()
     if (host is not None and host.get(p.DOC) == document.id
             and (not consumers or any(item.body_id == host.get(p.BODY) for item in consumers))):
         from .selection import _rigid
@@ -320,11 +426,20 @@ def erase_reference(context, reference_id):
 
 
 def _delete_definitions(document, bodies):
+    for sketch in document.sketches:
+        if (sketch.support is not None and sketch.support.face.body_id in bodies
+                and not any(feature.sketch_id == sketch.id for feature in document.features)):
+            raise ValueError("Solid supports an unused sketch; detach or delete that sketch explicitly before deleting or converting its support Solid")
+    previous_bodies = {feature.body_id for feature in document.features}
     roots = [feature.id for feature in document.features if feature.body_id in bodies and feature.input_id is None]
     if len(roots) != len(bodies):
         raise ValueError("Cannot resolve the selected body's root feature")
     for root in roots:
-        document.erase_feature(root, cascade=True)
+        if any(feature.id == root for feature in document.features):
+            document.erase_feature(root, cascade=True)
+    removed = previous_bodies - {feature.body_id for feature in document.features}
+    if removed - bodies:
+        raise ValueError("Selected Solid supports another Solid; select its dependent Solids too or detach their sketch supports first")
 
 
 def delete(context):
@@ -355,6 +470,14 @@ def _clone_body(document, body_id):
             for target in constraint["targets"]:
                 if target["entity"] is not None:
                     target["entity"] = remap[target["entity"]]
+        if "support" in sketch:
+            support = sketch["support"]
+            support["feature"] = remap.get(support["feature"], support["feature"])
+            face = support["face"]
+            original = n.PersistentReference(face["body"], n.TopologyKind.FACE,
+                                             n.ReferenceAnchor(face["feature"], face["key"]))
+            target = n.remap_reference(original, remap)
+            face.update(body=target.body_id, feature=target.anchor.feature_id, key=target.anchor.key)
         snapshot["sketches"].append(sketch)
     for feature in copy.deepcopy(chain):
         for key in ("id", "body", "sketch", "input"):

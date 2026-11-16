@@ -71,6 +71,12 @@ public:
     [[nodiscard]] std::unique_ptr<FeatureEvaluator> fork() const;
     [[nodiscard]] EvaluationReport evaluate(const Document& document);
     [[nodiscard]] bool matches_document(const Document& document) const;
+    [[nodiscard]] SketchProblem evaluated_sketch(const Document& document, const DocumentId& sketch) const;
+    // Support is evaluated in its explicit upstream feature context, not the
+    // final body tip that may itself depend on the attached sketch.
+    [[nodiscard]] SketchPlane support_plane(const Document& document, const SketchSupport& support) const;
+    [[nodiscard]] std::optional<SketchPlane> planar_face(const Document& document, const DocumentId& body,
+                                                        std::uint32_t face_index) const;
     [[nodiscard]] double volume_mm3(const Document& document, const DocumentId& body) const;
     [[nodiscard]] PersistentReference capture_reference(const Document& document, const DocumentId& body,
                                                         TopologyKind kind, std::uint32_t index) const;
