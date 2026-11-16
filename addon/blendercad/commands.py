@@ -6,6 +6,9 @@ construction history remains independent of Blender's undo log.
 """
 
 import copy
+import os
+from pathlib import Path
+import tempfile
 
 import bpy
 
@@ -23,6 +26,61 @@ def selected(context, operation):
     if any(host.get(p.DOC) != document.id for host in hosts):
         raise ValueError("Selected Solid does not belong to this scene's CAD document")
     return document, hosts
+
+
+def _step_export_source(context):
+    """Validate a current analytic source without recomputing or editing it."""
+    from . import sketch_editor
+    sketch_editor.authorize_commit(context.scene)
+    document, hosts = selected(context, "export")
+    if len(hosts) != 1 or p.host_for(context.active_object) != hosts[0]:
+        raise ValueError("Select exactly one active CAD Solid for STEP export")
+    host = hosts[0]
+    p._validate_associations(context.scene, document.id)
+    from .selection import _rigid
+    _rigid(host)
+    state = p.runtime(context.scene)
+    if not state.evaluator.matches_document(document):
+        raise ValueError("CAD document changed; recompute before exporting STEP")
+    body = next((item for item in state.report.bodies if item.body_id == host[p.BODY]), None) if state.report else None
+    if body is None or body.state != n.EvaluationState.UP_TO_DATE:
+        raise ValueError("Selected Solid has no current valid CAD geometry; repair or recompute before exporting STEP")
+    return document, host[p.BODY], state.evaluator
+
+
+def export_step(context, filepath):
+    """Publish one current part-local millimetre B-rep as an atomic STEP file.
+
+    Placement and display tessellation are presentation inputs, not alternate
+    export geometry. No document, Blender object or undo state is changed here.
+    """
+    document, body, evaluator = _step_export_source(context)
+    raw = os.fspath(filepath)
+    if not isinstance(raw, str) or not raw:
+        raise ValueError("Choose a STEP export file path")
+    destination = Path(bpy.path.abspath(raw)).absolute()
+    if not destination.parent.is_dir():
+        raise ValueError("STEP export directory does not exist: " + str(destination.parent))
+    if destination.exists() and not destination.is_file():
+        raise ValueError("Choose a STEP file path, not a directory or special file")
+    snapshot = context.scene.blendercad_document_snapshot
+    temporary = None
+    try:
+        # A fixed short prefix also supports destination names near NAME_MAX.
+        descriptor, name = tempfile.mkstemp(prefix=".blendercad-step-", suffix=".step", dir=destination.parent)
+        temporary = Path(name)
+        os.close(descriptor)
+        evaluator.write_step(document, body, str(temporary))
+        if not temporary.is_file() or temporary.stat().st_size == 0:
+            raise RuntimeError("The CAD writer did not produce a STEP file")
+        if (context.scene.blendercad_document_snapshot != snapshot
+                or not evaluator.matches_document(document)):
+            raise ValueError("CAD document changed during STEP export; recompute and export again")
+        os.replace(temporary, destination)
+        return destination
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def commit(scene, document, convert_hosts=(), *, sketch_session=None, placements=None):

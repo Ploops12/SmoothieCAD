@@ -1,6 +1,6 @@
 # BlenderCAD
 
-BlenderCAD is an ordinary Blender addon with a separate C++ computational core. The current implementation provides a versioned design document, OCCT/PlaneGCS services and initial numeric modelling commands with managed Solid display. The complete interactive sketch-to-bracket workflow remains under development.
+BlenderCAD is an ordinary Blender addon with a separate C++ computational core. The current implementation provides a versioned design document, OCCT/PlaneGCS services and parametric modelling commands with managed Solid display. A reference constrained sketch-to-bracket workflow is verified inside Blender at three scales; broader CAD capabilities remain under development.
 
 ## Current implementation
 
@@ -11,7 +11,7 @@ BlenderCAD is an ordinary Blender addon with a separate C++ computational core. 
 - `tests/`: geometry, sketch-solving, Solid/persistence, event-routing and CMake cleanup checks.
 - `docs/`: architecture and build/dependency notes.
 
-The native core provides stable IDs, versioned snapshots, atomic revisions, unit-tagged parameters, persistent sketches and extrusion/subtractive/constant-radius fillet feature definitions. PlaneGCS solves sketch constraints; a revision-aware evaluator drives OCCT, caches unchanged results and retains explicitly stale displays on failure while blocking stale measurements/exports. Features support named length inputs, suppression, dependency-checked reorder/deletion and rollback. Construction-based topology references support explicit split/merged/deleted/ambiguous diagnostics and named-reference repair. The addon preserves definitions in Blender scene properties and presents bodies through non-mesh hosts with managed meshes. Face/edge/vertex selection, GPU highlights and kernel measurements now complement numeric rectangle/depth/parameter commands, definition duplication, conversion, deletion and load/undo reconstruction. Fillets consume persistent edge targets; the sidebar exposes suppression, rollback, dependency-checked reorder/deletion and explicit fillet input repair. The complete bracket workflow remains unaccepted.
+The native core provides stable IDs, versioned snapshots, atomic revisions, unit-tagged parameters, persistent sketches and extrusion/subtractive/constant-radius fillet feature definitions. PlaneGCS solves sketch constraints; a revision-aware evaluator drives OCCT, caches unchanged results and retains explicitly stale displays on failure while blocking stale measurements/exports. Features support named length inputs, suppression, dependency-checked reorder/deletion and rollback. Construction-based topology references support explicit split/merged/deleted/ambiguous diagnostics and named-reference repair. The addon preserves definitions in Blender scene properties and presents bodies through non-mesh hosts with managed meshes. Face/edge/vertex selection, GPU highlights and kernel measurements now complement numeric rectangle/depth/parameter commands, definition duplication, conversion, deletion and load/undo reconstruction. Fillets consume persistent edge targets; the sidebar exposes suppression, rollback, dependency-checked reorder/deletion and explicit fillet input repair. The reference bracket checks cover modal sketch construction, earlier parameter edits, undo/redo, save/reopen, Cycles rendering and analytic STEP exchange, including actual addon installation and restart.
 
 ## Build and package
 
@@ -40,6 +40,10 @@ See [Sketch dimensions](docs/sketch-dimensions.md) for parameter bindings, numer
 See [Interactive sketches](docs/interactive-sketches.md) for viewport drawing/constraints/dragging, transactional confirmation, and sketch extrusion/cuts.
 
 See [Fillets and history](docs/fillets-and-history.md) for persistent edge inputs, radius editing, explicit repair and schema-7 records.
+
+See [STEP export](docs/step-exchange.md) for current-result validation, part-local millimetre coordinates and atomic file publication.
+
+See [Bracket acceptance](docs/bracket-acceptance.md) for the reference model, three-scale Blender checks, installation evidence and remaining scope.
 
 See [Features and evaluation](docs/features-and-evaluation.md) for body ownership, dependency history, caching, failures and query/export guards.
 

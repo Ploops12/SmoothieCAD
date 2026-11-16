@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import resource
 import subprocess
 import signal
 
@@ -13,24 +14,32 @@ parser.add_argument("--blender", required=True)
 parser.add_argument("--script", required=True)
 parser.add_argument("--addon-zip", required=True)
 parser.add_argument("--output-dir", required=True, type=Path)
+parser.add_argument("--timeout", type=float, default=60)
+parser.add_argument("--script-arg", action="append", default=[])
 options = parser.parse_args()
+if options.timeout <= 0:
+    parser.error("--timeout must be positive")
+# Blender's own diagnostic/recovery files use the isolated TMPDIR below.
+# Prevent kernel core dumps from escaping the CMake-owned check artifacts.
+resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 options.output_dir.mkdir(parents=True, exist_ok=True)
 result_file = options.output_dir / "result.json"
 result_file.unlink(missing_ok=True)
 command = [options.xvfb, "-a", "-s", "-screen 0 1280x900x24", options.blender,
            "--factory-startup", "--gpu-backend", "opengl", "--enable-event-simulate", "--python", options.script,
-           "--", "--addon-zip", options.addon_zip, "--output-dir", str(options.output_dir)]
+           "--", "--addon-zip", options.addon_zip, "--output-dir", str(options.output_dir), *options.script_arg]
 with (options.output_dir / "blender.log").open("w") as log:
     environment = dict(os.environ)
     environment.pop("WAYLAND_DISPLAY", None)
     environment["XDG_SESSION_TYPE"] = "x11"
+    environment["ALSOFT_DRIVERS"] = "null"
     for variable, subdirectory in (("BLENDER_USER_CONFIG", "config"), ("TMPDIR", "runtime")):
         directory = (options.output_dir / subdirectory).resolve()
         directory.mkdir(parents=True, exist_ok=True)
         environment[variable] = str(directory)
     process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=environment, start_new_session=True)
     try:
-        returncode = process.wait(timeout=60)
+        returncode = process.wait(timeout=options.timeout)
     except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGTERM)
         try:

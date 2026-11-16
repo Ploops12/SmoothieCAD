@@ -68,6 +68,13 @@ add_custom_target(package_sources
         --include-project-path tests/source_rebuild.py
         --include-project-path tests/runtime_staging.py
         --include-project-path docs/runtime-packaging.md
+        --include-project-path tests/blender_bracket.py
+        --include-project-path tests/blender_bracket_ui.py
+        --include-project-path tests/blender_step_export.py
+        --include-project-path tests/blender_installation.py
+        --include-project-path tools/check_blender_install.py
+        --include-project-path docs/bracket-acceptance.md
+        --include-project-path docs/step-exchange.md
     DEPENDS package_notices
     COMMENT "Packaging companion sources and offline rebuild materials"
     VERBATIM

@@ -29,6 +29,8 @@ set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES
     "${CMAKE_BINARY_DIR}/dist" "${CMAKE_BINARY_DIR}/addon" "${CMAKE_BINARY_DIR}/ui-tests"
     "${CMAKE_BINARY_DIR}/sketch-ui-tests"
     "${CMAKE_BINARY_DIR}/fillet-ui-tests"
+    "${CMAKE_BINARY_DIR}/bracket-tests" "${CMAKE_BINARY_DIR}/bracket-ui-tests"
+    "${CMAKE_BINARY_DIR}/installation-tests"
 )
 
 add_library(blendercad_core STATIC
@@ -138,14 +140,31 @@ if(BLENDERCAD_BUILD_PYTHON)
                 --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/blender_foundation.py"
                 -- --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
         )
-        foreach(_blendercad_check IN ITEMS blender_solids blender_capabilities blender_references blender_selection blender_lifecycle blender_parameters blender_sketch_parameters blender_sketch_editor blender_fillets highlight_arrays)
+        foreach(_blendercad_check IN ITEMS blender_solids blender_capabilities blender_references blender_selection blender_lifecycle blender_parameters blender_sketch_parameters blender_sketch_editor blender_fillets blender_step_export highlight_arrays)
             add_test(NAME ${_blendercad_check}
                 COMMAND "${BLENDERCAD_BLENDER_EXECUTABLE}" --background --factory-startup
                     --python-exit-code 1 --python "${CMAKE_CURRENT_SOURCE_DIR}/tests/${_blendercad_check}.py"
                     -- --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
             )
         endforeach()
-        set_tests_properties(native_geometry native_sketch document_snapshot native_features native_topology native_references native_queries native_query_guards native_parameters native_sketch_parameters native_fillets blender_foundation blender_solids blender_capabilities blender_references blender_selection blender_lifecycle blender_parameters blender_sketch_parameters blender_sketch_editor blender_fillets highlight_arrays PROPERTIES
+        add_test(NAME blender_bracket
+            COMMAND "${BLENDERCAD_BLENDER_EXECUTABLE}" --background --factory-startup
+                --python-exit-code 1 --python "${CMAKE_SOURCE_DIR}/tests/blender_bracket.py"
+                -- --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
+                --output-dir "${CMAKE_BINARY_DIR}/bracket-tests")
+        set_tests_properties(blender_bracket PROPERTIES ENVIRONMENT "ALSOFT_DRIVERS=null" FIXTURES_SETUP bracket_model)
+        add_test(NAME blender_installation
+            COMMAND "${Python_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_blender_install.py"
+                --blender "${BLENDERCAD_BLENDER_EXECUTABLE}"
+                --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
+                --output-dir "${CMAKE_BINARY_DIR}/installation-tests"
+                --script "${CMAKE_SOURCE_DIR}/tests/blender_installation.py"
+                --fixture-blend "${CMAKE_BINARY_DIR}/bracket-tests/mechanical/bracket-mechanical.blend")
+        set_tests_properties(blender_installation PROPERTIES FIXTURES_REQUIRED bracket_model)
+        add_custom_target(check_installation
+            COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^blender_installation$"
+            WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" DEPENDS package_addon USES_TERMINAL VERBATIM)
+        set_tests_properties(native_geometry native_sketch document_snapshot native_features native_topology native_references native_queries native_query_guards native_parameters native_sketch_parameters native_fillets blender_foundation blender_solids blender_capabilities blender_references blender_selection blender_lifecycle blender_parameters blender_sketch_parameters blender_sketch_editor blender_fillets blender_step_export highlight_arrays PROPERTIES
             ENVIRONMENT "ALSOFT_DRIVERS=null"
         )
         find_program(BLENDERCAD_BWRAP_EXECUTABLE NAMES bwrap)
@@ -180,6 +199,27 @@ if(BLENDERCAD_BUILD_PYTHON)
         )
         find_program(BLENDERCAD_XVFB_RUN_EXECUTABLE NAMES xvfb-run)
         if(BLENDERCAD_XVFB_RUN_EXECUTABLE)
+            set(_bracket_ui_commands)
+            foreach(_case IN ITEMS small ordinary furniture)
+                if(_case STREQUAL "small")
+                    set(_scale 0.01)
+                elseif(_case STREQUAL "ordinary")
+                    set(_scale 1)
+                else()
+                    set(_scale 20)
+                endif()
+                set(_bracket_command "${Python_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_blender_ui.py"
+                    --xvfb "${BLENDERCAD_XVFB_RUN_EXECUTABLE}" --blender "${BLENDERCAD_BLENDER_EXECUTABLE}"
+                    --script "${CMAKE_SOURCE_DIR}/tests/blender_bracket_ui.py"
+                    --addon-zip "${CMAKE_BINARY_DIR}/dist/blendercad-${PROJECT_VERSION}.zip"
+                    --output-dir "${CMAKE_BINARY_DIR}/bracket-ui-tests/${_case}" --timeout 180
+                    --script-arg=--scale "--script-arg=${_scale}")
+                list(APPEND _bracket_ui_commands COMMAND ${_bracket_command})
+                add_custom_target(check_bracket_ui_${_case} COMMAND ${_bracket_command}
+                    DEPENDS package_addon USES_TERMINAL VERBATIM)
+            endforeach()
+            add_custom_target(check_bracket_ui ${_bracket_ui_commands}
+                DEPENDS package_addon USES_TERMINAL VERBATIM)
             add_custom_target(check_fillet_ui
                 COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_blender_ui.py"
                     --xvfb "${BLENDERCAD_XVFB_RUN_EXECUTABLE}"

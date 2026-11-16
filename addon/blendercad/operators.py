@@ -2,6 +2,7 @@
 
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
+from bpy_extras.io_utils import ExportHelper
 from mathutils import Vector
 
 from . import commands, presentation as p
@@ -41,6 +42,57 @@ class CadOperator:
         except (ValueError, RuntimeError, KeyError, TypeError, OverflowError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class BLENDERCAD_OT_export_step(bpy.types.Operator, ExportHelper):
+    bl_idname = "blendercad.export_step"
+    bl_label = "Export Solid as STEP"
+    bl_description = "Export the active Solid's current analytic CAD geometry in part-local millimetres; object placement is not included"
+    # Export is an external file operation, not modelling undo or F9 replay.
+    bl_options = set()
+    filename_ext = ".step"
+    filter_glob: StringProperty(default="*.step;*.stp", options={"HIDDEN"})
+
+    @classmethod
+    def poll(cls, context):
+        from . import sketch_editor
+        if (p._native is None or sketch_editor.active is not None or context.scene is None
+                or context.mode != "OBJECT" or not context.scene.blendercad_document_snapshot):
+            return False
+        try:
+            commands._step_export_source(context)
+        except (ValueError, RuntimeError, KeyError, TypeError, OverflowError, ReferenceError):
+            return False
+        return True
+
+    def invoke(self, context, event):
+        if not self.filepath:
+            import os
+            host = p.host_for(context.active_object)
+            filename = bpy.path.clean_name(host.name) if host is not None else "Solid"
+            self.filepath = os.path.join(os.path.dirname(bpy.data.filepath), (filename or "Solid") + self.filename_ext)
+        return ExportHelper.invoke(self, context, event)
+
+    def check(self, context):
+        if self.filepath.lower().endswith((".step", ".stp")):
+            return False
+        return ExportHelper.check(self, context)
+
+    def draw(self, context):
+        self.layout.label(text="Part-local geometry · millimetres")
+        self.layout.label(text="Object placement is not included")
+
+    def execute(self, context):
+        try:
+            destination = commands.export_step(context, self.filepath)
+        except (ValueError, RuntimeError, KeyError, TypeError, OverflowError, OSError, ReferenceError) as error:
+            message = str(error)
+            if message != commands.capabilities.INCOMPATIBLE_MESSAGE:
+                message = "STEP export failed: " + message
+            self.report({"ERROR"}, message)
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Exported STEP: " + str(destination))
         return {"FINISHED"}
 
 
@@ -396,7 +448,7 @@ class BLENDERCAD_OT_pick_solid(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (BLENDERCAD_OT_add_rectangle_solid, BLENDERCAD_OT_extrude_sketch, BLENDERCAD_OT_recompute, BLENDERCAD_OT_set_sketch_dimension,
+_classes = (BLENDERCAD_OT_export_step, BLENDERCAD_OT_add_rectangle_solid, BLENDERCAD_OT_extrude_sketch, BLENDERCAD_OT_recompute, BLENDERCAD_OT_set_sketch_dimension,
             BLENDERCAD_OT_fillet, BLENDERCAD_OT_set_fillet_radius, BLENDERCAD_OT_repair_fillet_edges,
             BLENDERCAD_OT_suppress_feature, BLENDERCAD_OT_rollback, BLENDERCAD_OT_move_feature, BLENDERCAD_OT_delete_feature,
             BLENDERCAD_OT_set_feature_depth, BLENDERCAD_OT_parameter,
@@ -405,12 +457,20 @@ _classes = (BLENDERCAD_OT_add_rectangle_solid, BLENDERCAD_OT_extrude_sketch, BLE
             BLENDERCAD_OT_save_reference, BLENDERCAD_OT_erase_reference)
 _keymaps = []
 _registered = []
+_export_menu_registered = False
+
+
+def _export_menu(self, context):
+    self.layout.operator("blendercad.export_step", text="BlenderCAD Solid (.step/.stp)")
 
 
 def register():
+    global _export_menu_registered
     for cls in _classes:
         bpy.utils.register_class(cls)
         _registered.append(cls)
+    bpy.types.TOPBAR_MT_file_export.append(_export_menu)
+    _export_menu_registered = True
     config = bpy.context.window_manager.keyconfigs.addon
     if config:
         keymap = config.keymaps.new(name="Object Mode", space_type="EMPTY")
@@ -423,6 +483,10 @@ def register():
 
 
 def unregister():
+    global _export_menu_registered
+    if _export_menu_registered:
+        bpy.types.TOPBAR_MT_file_export.remove(_export_menu)
+        _export_menu_registered = False
     for keymap, item in _keymaps:
         keymap.keymap_items.remove(item)
     _keymaps.clear()

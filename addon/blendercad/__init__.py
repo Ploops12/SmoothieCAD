@@ -228,6 +228,7 @@ def _classes():
                 box.operator("blendercad.fillet")
                 box.operator("blendercad.save_reference")
                 box.operator("blendercad.frame_solid")
+                box.operator("blendercad.export_step")
                 box.operator("blendercad.delete_solid")
                 box.operator("blendercad.convert_to_regular_mesh")
 

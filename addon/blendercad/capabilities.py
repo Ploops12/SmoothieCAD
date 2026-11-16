@@ -8,7 +8,7 @@ INCOMPATIBLE_MESSAGE = "Incompatible operation - Convert to regular mesh first"
 
 _SUPPORTED = frozenset({
     "translate", "rotate", "duplicate", "delete", "convert",
-    "edit_definition", "recompute", "pick",
+    "edit_definition", "recompute", "pick", "export",
 })
 _KEYMAP_ITEMS = []
 _REGISTERED_CLASSES = ()

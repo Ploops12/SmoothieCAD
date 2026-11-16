@@ -664,13 +664,23 @@ def rebuild_after_history(_unused):
                 runtime(scene).error = str(error)
 
 
+def _initial_rebuild():
+    # addon_utils registers addons under RestrictBlend: scene data is not
+    # available until registration returns. Timers execute on the main thread.
+    rebuild_after_history(None)
+    return None
+
+
 def register():
     for handlers in (bpy.app.handlers.load_post, bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         handlers.append(rebuild_after_history)
-    rebuild_after_history(None)
+    if not bpy.app.timers.is_registered(_initial_rebuild):
+        bpy.app.timers.register(_initial_rebuild, first_interval=0)
 
 
 def unregister():
+    if bpy.app.timers.is_registered(_initial_rebuild):
+        bpy.app.timers.unregister(_initial_rebuild)
     for handlers in (bpy.app.handlers.load_post, bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         if rebuild_after_history in handlers:
             handlers.remove(rebuild_after_history)
