@@ -147,13 +147,17 @@ follows the sketch plane's positive right-handed normal; position/orient the
 sketch accordingly. Creating features while rolled back is rejected explicitly.
 Earlier sketch edits recompute affected features, and stable references resolve
 through their existing provenance rather than new display indices.
+The sketch list's **Preview**/**Preview Cut** buttons offer the same creation
+definitions through a detached ghost result and depth handle, with numeric
+entry and one-interaction confirmation/cancellation; see
+[solid feature previews](solid-feature-previews.md).
 
 Current profile evaluation still accepts one connected simple line loop or one
 circle per sketch. Open chains, multiple regions and mixed line/arc loops do not
 silently become an arbitrary chosen face. Use separate closed sketches/cuts for
 separate hole profiles until multiple-region/arc evaluation is implemented.
 Face-attached associative planes, a full sketch toolbar/gizmo system, per-stroke
-undo, solid feature previews and additive unions remain follow-up work.
+undo and additive unions remain follow-up work.
 [Constant-radius fillets](fillets-and-history.md) now consume selected persistent
 CAD edges after extrusion/cuts. The complete bracket acceptance gate is not claimed here.
 

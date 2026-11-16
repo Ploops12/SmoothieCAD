@@ -40,7 +40,9 @@ def _classes():
 
         @classmethod
         def poll(cls, context):
+            from . import feature_editor, sketch_editor
             return (_native is not None and context.scene is not None
+                    and feature_editor.active is None and sketch_editor.active is None
                     and not context.scene.blendercad_document_snapshot)
 
         def execute(self, context):
@@ -61,12 +63,15 @@ def _classes():
         bl_category = "BlenderCAD"
 
         def draw(self, context):
-            from . import sketch_editor
+            from . import sketch_editor, feature_editor
             self.layout.label(text=_native_status())
             if _native is None:
                 return
             if sketch_editor.active is not None:
                 self.layout.label(text="Editing sketch · Enter confirm · Esc cancel")
+                self.layout.enabled = False
+            elif feature_editor.active is not None:
+                self.layout.label(text="Previewing feature · Enter confirm · Esc cancel")
                 self.layout.enabled = False
 
             serialized = context.scene.blendercad_document_snapshot
@@ -124,6 +129,9 @@ def _classes():
                 else:
                     operator = row.operator("blendercad.set_feature_depth", text="Depth")
                     operator.feature_id = feature.id
+                operator = row.operator("blendercad.preview_feature", text="Handle")
+                operator.feature_id = feature.id
+                operator.operation = "RADIUS" if feature.type == "fillet" else "DEPTH"
                 operator = row.operator("blendercad.suppress_feature", text="Unsuppress" if feature.suppressed else "Suppress")
                 operator.feature_id, operator.suppressed = feature.id, not feature.suppressed
                 operator = row.operator("blendercad.rollback", text="Edit Inputs" if feature.type == "fillet" else "Before")
@@ -151,6 +159,9 @@ def _classes():
                 operator.sketch_id = sketch.id
                 operator = row.operator("blendercad.extrude_sketch", text="Extrude")
                 operator.sketch_id = sketch.id
+                for mode, label in (("EXTRUDE", "Preview"), ("CUT", "Preview Cut")):
+                    operator = row.operator("blendercad.preview_feature", text=label)
+                    operator.sketch_id, operator.operation = sketch.id, mode
             resolutions = {entry.reference_id: entry.resolution for entry in state.report.references} if state.report and state.serialized == serialized else {}
             for reference in document.references:
                 box = self.layout.box()
@@ -226,6 +237,8 @@ def _classes():
                     box.label(text="Selection overlay unavailable", icon="ERROR")
                 box.operator("blendercad.duplicate_solid")
                 box.operator("blendercad.fillet")
+                operator = box.operator("blendercad.preview_feature", text="Preview Selected Edge Fillet")
+                operator.operation = "FILLET"
                 box.operator("blendercad.save_reference")
                 box.operator("blendercad.frame_solid")
                 box.operator("blendercad.export_step")
@@ -241,7 +254,7 @@ _registered_classes = ()
 def register():
     import bpy
     from bpy.props import EnumProperty, StringProperty
-    from . import capabilities, highlight, lifecycle, operators, presentation, sketch_editor
+    from . import capabilities, highlight, lifecycle, operators, presentation, sketch_editor, feature_editor
 
     global _registered_classes
     bpy.types.Scene.blendercad_document_snapshot = StringProperty(
@@ -262,6 +275,7 @@ def register():
             bpy.utils.register_class(cls)
         operators.register()
         sketch_editor.register()
+        feature_editor.register()
         capabilities.register()
         presentation.register()
         lifecycle.register()
@@ -269,6 +283,7 @@ def register():
     except Exception:
         # Each module unregisters only the hooks it installed.
         highlight.unregister()
+        feature_editor.unregister()
         sketch_editor.unregister()
         lifecycle.unregister()
         presentation.unregister()
@@ -285,10 +300,11 @@ def register():
 
 def unregister():
     import bpy
-    from . import capabilities, highlight, lifecycle, operators, presentation, sketch_editor
+    from . import capabilities, highlight, lifecycle, operators, presentation, sketch_editor, feature_editor
 
     global _registered_classes
     highlight.unregister()
+    feature_editor.unregister()
     sketch_editor.unregister()
     lifecycle.unregister()
     presentation.unregister()

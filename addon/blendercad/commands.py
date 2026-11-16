@@ -30,8 +30,9 @@ def selected(context, operation):
 
 def _step_export_source(context):
     """Validate a current analytic source without recomputing or editing it."""
-    from . import sketch_editor
+    from . import sketch_editor, feature_editor
     sketch_editor.authorize_commit(context.scene)
+    feature_editor.authorize_commit(context.scene)
     document, hosts = selected(context, "export")
     if len(hosts) != 1 or p.host_for(context.active_object) != hosts[0]:
         raise ValueError("Select exactly one active CAD Solid for STEP export")
@@ -83,9 +84,10 @@ def export_step(context, filepath):
             temporary.unlink(missing_ok=True)
 
 
-def commit(scene, document, convert_hosts=(), *, sketch_session=None, placements=None):
-    from . import sketch_editor
+def commit(scene, document, convert_hosts=(), *, sketch_session=None, feature_session=None, placements=None):
+    from . import sketch_editor, feature_editor
     sketch_editor.authorize_commit(scene, sketch_session)
+    feature_editor.authorize_commit(scene, feature_session)
     previous_runtime = p.runtime(scene)
     prepared = p.prepare(scene, document, convert_hosts)
     prepared.host_placements = placements or {}
@@ -144,9 +146,12 @@ def add_rectangle(context, width, height, depth, width_parameter="", height_para
 
 
 def set_depth(context, feature_id, depth):
+    from .feature_commands import set_feature_input
     capabilities.require_capability(context.selected_objects, "edit_definition")
     document = p.read_document(context.scene)
-    document.set_feature_depth(feature_id, depth)
+    if document.get_feature(feature_id).type == "fillet":
+        raise ValueError("Select an extrusion feature")
+    set_feature_input(document, feature_id, depth)
     return commit(context.scene, document)
 
 
@@ -161,21 +166,25 @@ def _fillet_picks(context, document, hosts):
 
 
 def add_fillet(context, radius):
+    from .feature_commands import Operation, create_feature
     document, hosts = selected(context, "edit_definition")
     if document.rollback_before is not None:
         raise ValueError("Return to the end of history before creating a fillet")
     host, edges = _fillet_picks(context, document, hosts)
     tip = next(item.id for item in reversed(document.features) if item.body_id == host[p.BODY])
-    feature = document.add_fillet("Fillet", tip, edges, radius)
+    feature = create_feature(document, Operation("fillet", input_id=tip, edges=tuple(edges)), radius)
     commit(context.scene, document)
     _select(context, [host[p.BODY]])
     return feature
 
 
 def set_fillet_radius(context, feature_id, radius):
+    from .feature_commands import set_feature_input
     capabilities.require_capability(context.selected_objects, "edit_definition")
     document = p.read_document(context.scene)
-    document.set_fillet_radius(feature_id, radius)
+    if document.get_feature(feature_id).type != "fillet":
+        raise ValueError("Select a fillet feature")
+    set_feature_input(document, feature_id, radius)
     return commit(context.scene, document)
 
 
@@ -258,15 +267,14 @@ def sketch_placement(context, document, sketch_id=""):
 
 
 def extrude_sketch(context, sketch_id, depth, input_feature_id=""):
+    from .feature_commands import Operation, create_feature
     capabilities.require_capability(context.selected_objects, "edit_definition")
     document = p.read_document(context.scene)
     if document.rollback_before is not None:
         raise ValueError("Return to the end of history before creating a feature")
     _host, placement = sketch_placement(context, document, sketch_id)
-    if input_feature_id:
-        feature = document.add_subtractive_extrusion("Sketch cut", input_feature_id, sketch_id, depth)
-    else:
-        feature = document.add_extrusion("Sketch extrusion", sketch_id, depth)
+    feature = create_feature(document, Operation("cut" if input_feature_id else "extrude",
+                             sketch_id=sketch_id, input_id=input_feature_id), depth)
     body = document.get_feature(feature).body_id
     commit(context.scene, document, placements={body: placement} if not input_feature_id else None)
     _select(context, [body])

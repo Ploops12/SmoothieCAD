@@ -121,6 +121,7 @@ This model uses explicit planar sketch frames, one region per profile, two
 individual through cuts and a constant-radius edge fillet. It does not establish
 associative face-attached planes, multiple profile regions, arbitrary surfacing,
 variable-radius blends, assemblies, spatial sketch solving, CAM/FEA/CFD or
-technical drawing sheets. Full toolbar/gizmo coverage, solid feature previews,
+technical drawing sheets. Solid feature previews and depth/radius handles now
+have their [own transaction tools](solid-feature-previews.md). Full toolbar/gizmo coverage,
 broader native operation protection and the documented rendering/selection gaps
 remain separate work even after this reference part passes.

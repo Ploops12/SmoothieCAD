@@ -41,6 +41,8 @@ See [Interactive sketches](docs/interactive-sketches.md) for viewport drawing/co
 
 See [Fillets and history](docs/fillets-and-history.md) for persistent edge inputs, radius editing, explicit repair and schema-7 records.
 
+See [Solid feature previews](docs/solid-feature-previews.md) for detached extrusion/cut/fillet results, depth/radius handles and transactional confirmation/cancellation.
+
 See [STEP export](docs/step-exchange.md) for current-result validation, part-local millimetre coordinates and atomic file publication.
 
 See [Bracket acceptance](docs/bracket-acceptance.md) for the reference model, three-scale Blender checks, installation evidence and remaining scope.

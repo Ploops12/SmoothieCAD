@@ -32,8 +32,8 @@ class CadOperator:
 
     @classmethod
     def poll(cls, context):
-        from . import sketch_editor
-        return (p._native is not None and sketch_editor.active is None and context.scene is not None
+        from . import sketch_editor, feature_editor
+        return (p._native is not None and sketch_editor.active is None and feature_editor.active is None and context.scene is not None
                 and bool(context.scene.blendercad_document_snapshot) and context.mode == "OBJECT")
 
     def execute(self, context):
@@ -56,8 +56,8 @@ class BLENDERCAD_OT_export_step(bpy.types.Operator, ExportHelper):
 
     @classmethod
     def poll(cls, context):
-        from . import sketch_editor
-        if (p._native is None or sketch_editor.active is not None or context.scene is None
+        from . import sketch_editor, feature_editor
+        if (p._native is None or sketch_editor.active is not None or feature_editor.active is not None or context.scene is None
                 or context.mode != "OBJECT" or not context.scene.blendercad_document_snapshot):
             return False
         try:
@@ -244,6 +244,9 @@ class BLENDERCAD_OT_recompute(CadOperator, bpy.types.Operator):
 
     def run(self, context):
         commands.capabilities.require_capability(context.selected_objects, "recompute")
+        from . import sketch_editor, feature_editor
+        sketch_editor.authorize_commit(context.scene)
+        feature_editor.authorize_commit(context.scene)
         p.sync(context.scene)
 
 
@@ -426,8 +429,8 @@ class BLENDERCAD_OT_pick_solid(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        from . import sketch_editor
-        return (sketch_editor.active is None and p._native is not None and context.scene is not None
+        from . import sketch_editor, feature_editor
+        return (sketch_editor.active is None and feature_editor.active is None and p._native is not None and context.scene is not None
                 and bool(context.scene.blendercad_document_snapshot)
                 and context.area is not None and context.area.type == "VIEW_3D"
                 and context.region is not None and context.region.type == "WINDOW" and context.mode == "OBJECT")

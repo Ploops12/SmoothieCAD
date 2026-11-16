@@ -6,6 +6,11 @@ Select a current Solid in **Edge** selection mode and select one or more CAD
 edges. **Fillet Selected CAD Edges** opens a radius dialog. Enter a literal
 millimetre radius or a named `mm` parameter (which may have an expression).
 Confirm to create a feature; cancel leaves the document and display unchanged.
+**Preview Selected Edge Fillet** instead opens the transactional viewport tool:
+it shows a detached ghost result, supports a scalar radius handle and numeric
+entry, and confirms/cancels through the same feature definitions. History's
+**Handle** edits an existing radius with downstream recomputation. See
+[solid feature previews](solid-feature-previews.md) for bindings and input rules.
 The operation consumes the body's latest feature, retaining its body identity.
 All selected edges use the same radius. OCCT may propagate a contour along
 tangent-connected edges; this is not an arbitrary face push/pull tool.
@@ -99,7 +104,7 @@ dialogs, cancellation, history and undo; generated evidence is in
 `build/fillet-ui-tests`, removed by normal CMake `clean`.
 
 Supported scope is OCCT constant-radius edge filleting on valid solid inputs.
-Variable-radius laws, chamfers, interactive solid previews/handles and general
+Variable-radius laws, chamfers and general
 edge-chain editing are not implemented. Some complex blends lack uniquely
 identifiable provenance; explicit repair can select another nameable region,
 but cannot manufacture missing construction history. This feature is not full

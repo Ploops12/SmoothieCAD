@@ -88,7 +88,8 @@ class BLENDERCAD_OT_edit_sketch(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return (n is not None and active is None and context.scene is not None
+        from . import feature_editor
+        return (n is not None and active is None and feature_editor.active is None and context.scene is not None
                 and bool(context.scene.blendercad_document_snapshot) and context.mode == "OBJECT"
                 and context.area is not None and context.area.type == "VIEW_3D")
 
@@ -107,6 +108,8 @@ class BLENDERCAD_OT_edit_sketch(bpy.types.Operator):
     def invoke(self, context, event):
         global active, _cancel_pending
         try:
+            from . import feature_editor
+            feature_editor.authorize_commit(context.scene)
             commands.capabilities.require_capability(context.selected_objects, "edit_definition")
             document = p.read_document(context.scene)
             self.scene, self.area = context.scene, context.area
